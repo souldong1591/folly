@@ -21,13 +21,13 @@
 #include <mutex>
 #include <random>
 
-#include <folly/CallOnce.h>
 #include <folly/File.h>
 #include <folly/FileUtil.h>
 #include <folly/SingletonThreadLocal.h>
 #include <folly/ThreadLocal.h>
 #include <folly/portability/SysTime.h>
 #include <folly/portability/Unistd.h>
+#include <folly/synchronization/CallOnce.h>
 #include <glog/logging.h>
 
 #ifdef _MSC_VER
@@ -150,4 +150,4 @@ ThreadLocalPRNG::ThreadLocalPRNG() {
 uint32_t ThreadLocalPRNG::getImpl(LocalInstancePRNG* local) {
   return local->rng();
 }
-}
+} // namespace folly

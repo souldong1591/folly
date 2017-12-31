@@ -18,14 +18,14 @@
  * @author: Marcelo Juchem <marcelo@fb.com>
  */
 
-#include <folly/Arena.h>
 #include <folly/Memory.h>
+#include <folly/memory/Arena.h>
 #include <folly/portability/GTest.h>
 
 using namespace folly;
 
 static_assert(
-  is_simple_allocator<int,SysArena>::value,
+  is_simple_allocator<SysArena, int>::value,
   "SysArena should be a simple allocator"
 );
 

@@ -16,9 +16,9 @@
 
 #include <folly/detail/MemoryIdler.h>
 
-#include <folly/Baton.h>
 #include <folly/portability/GMock.h>
 #include <folly/portability/GTest.h>
+#include <folly/synchronization/Baton.h>
 
 #include <memory>
 #include <thread>
@@ -100,7 +100,8 @@ struct Futex<MockAtom> {
                FutexResult(uint32_t, const MockClock::time_point&, uint32_t));
 };
 
-}}
+} // namespace detail
+} // namespace folly
 
 TEST(MemoryIdler, futexWaitValueChangedEarly) {
   StrictMock<Futex<MockAtom>> fut;

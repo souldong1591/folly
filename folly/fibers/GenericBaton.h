@@ -15,7 +15,7 @@
  */
 #pragma once
 
-#include <folly/Baton.h>
+#include <folly/synchronization/Baton.h>
 
 #include <folly/fibers/Baton.h>
 
@@ -23,5 +23,5 @@ namespace folly {
 namespace fibers {
 
 typedef Baton GenericBaton;
-}
-}
+} // namespace fibers
+} // namespace folly

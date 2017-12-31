@@ -97,7 +97,8 @@ class FiberImpl {
 
   void deactivate() {
 #if BOOST_VERSION >= 106100
-    auto transfer = boost::context::detail::jump_fcontext(mainContext_, 0);
+    auto transfer =
+        boost::context::detail::jump_fcontext(mainContext_, nullptr);
     mainContext_ = transfer.fctx;
     auto context = reinterpret_cast<intptr_t>(transfer.data);
 #elif BOOST_VERSION >= 105600

@@ -22,7 +22,8 @@
 namespace folly { namespace detail {
 
 EventBaseLocalBase::~EventBaseLocalBase() {
-  for (auto* evb : *eventBases_.rlock()) {
+  auto locked = eventBases_.rlock();
+  for (auto* evb : *locked) {
     evb->runInEventBaseThread([ this, evb, key = key_ ] {
       evb->localStorage_.erase(key);
       evb->localStorageToDtor_.erase(this);
@@ -70,4 +71,5 @@ void EventBaseLocalBase::setVoid(EventBase& evb, std::shared_ptr<void>&& ptr) {
 }
 
 std::atomic<uint64_t> EventBaseLocalBase::keyCounter_{0};
-}}
+} // namespace detail
+} // namespace folly

@@ -156,8 +156,8 @@ class AsyncSocket : virtual public AsyncTransportWrapper {
      *
      * @param flags     Write flags requested for the given write operation
      */
-    int getFlags(folly::WriteFlags flags) noexcept {
-      return getFlagsImpl(flags, getDefaultFlags(flags));
+    int getFlags(folly::WriteFlags flags, bool zeroCopyEnabled) noexcept {
+      return getFlagsImpl(flags, getDefaultFlags(flags, zeroCopyEnabled));
     }
 
     /**
@@ -211,7 +211,7 @@ class AsyncSocket : virtual public AsyncTransportWrapper {
      *
      * @param flags     Write flags requested for the given write operation
      */
-    int getDefaultFlags(folly::WriteFlags flags) noexcept;
+    int getDefaultFlags(folly::WriteFlags flags, bool zeroCopyEnabled) noexcept;
   };
 
   explicit AsyncSocket();
@@ -222,7 +222,7 @@ class AsyncSocket : virtual public AsyncTransportWrapper {
    */
   explicit AsyncSocket(EventBase* evb);
 
-  void setShutdownSocketSet(ShutdownSocketSet* ss);
+  void setShutdownSocketSet(const std::weak_ptr<ShutdownSocketSet>& wSS);
 
   /**
    * Create a new AsyncSocket and begin the connection process.
@@ -261,8 +261,9 @@ class AsyncSocket : virtual public AsyncTransportWrapper {
    *
    * @param evb EventBase that will manage this socket.
    * @param fd  File descriptor to take over (should be a connected socket).
+   * @param zeroCopyBufId Zerocopy buf id to start with.
    */
-  AsyncSocket(EventBase* evb, int fd);
+  AsyncSocket(EventBase* evb, int fd, uint32_t zeroCopyBufId = 0);
 
   /**
    * Create an AsyncSocket from a different, already connected AsyncSocket.
@@ -503,6 +504,15 @@ class AsyncSocket : virtual public AsyncTransportWrapper {
   // Read and write methods
   void setReadCB(ReadCallback* callback) override;
   ReadCallback* getReadCallback() const override;
+
+  bool setZeroCopy(bool enable);
+  bool getZeroCopy() const {
+    return zeroCopyEnabled_;
+  }
+
+  uint32_t getZeroCopyBufId() const {
+    return zeroCopyBufId_;
+  }
 
   void write(WriteCallback* callback, const void* buf, size_t bytes,
              WriteFlags flags = WriteFlags::NONE) override;
@@ -792,6 +802,18 @@ class AsyncSocket : virtual public AsyncTransportWrapper {
    * getLocalAddress() even after the socket is closed.
    */
   void cacheAddresses();
+
+  /**
+   * Returns true if there is any zero copy write in progress
+   * Needs to be called from within the socket's EVB thread
+   */
+  bool isZeroCopyWriteInProgress() const noexcept;
+
+  /**
+   * Tries to process the msg error queue
+   * And returns true if there are no more zero copy writes in progress
+   */
+  bool processZeroCopyWriteInProgress() noexcept;
 
   /**
    * writeReturn is the total number of bytes written, or WRITE_ERROR on error.
@@ -1133,6 +1155,35 @@ class AsyncSocket : virtual public AsyncTransportWrapper {
   void cacheLocalAddress() const;
   void cachePeerAddress() const;
 
+  bool isZeroCopyRequest(WriteFlags flags);
+
+  bool isZeroCopyMsg(const cmsghdr& cmsg) const;
+  void processZeroCopyMsg(const cmsghdr& cmsg);
+
+  uint32_t getNextZeroCopyBufId() {
+    return zeroCopyBufId_++;
+  }
+  void adjustZeroCopyFlags(folly::WriteFlags& flags);
+  void addZeroCopyBuf(std::unique_ptr<folly::IOBuf>&& buf);
+  void addZeroCopyBuf(folly::IOBuf* ptr);
+  void setZeroCopyBuf(std::unique_ptr<folly::IOBuf>&& buf);
+  bool containsZeroCopyBuf(folly::IOBuf* ptr);
+  void releaseZeroCopyBuf(uint32_t id);
+
+  // a folly::IOBuf can be used in multiple partial requests
+  // there is a that maps a buffer id to a raw folly::IOBuf ptr
+  // and another one that adds a ref count for a folly::IOBuf that is either
+  // the original ptr or nullptr
+  uint32_t zeroCopyBufId_{0};
+
+  struct IOBufInfo {
+    uint32_t count_{0};
+    std::unique_ptr<folly::IOBuf> buf_;
+  };
+
+  std::unordered_map<uint32_t, folly::IOBuf*> idZeroCopyBufPtrMap_;
+  std::unordered_map<folly::IOBuf*, IOBufInfo> idZeroCopyBufInfoMap_;
+
   StateEnum state_;                      ///< StateEnum describing current state
   uint8_t shutdownFlags_;                ///< Shutdown state (ShutdownFlags)
   uint16_t eventFlags_;                  ///< EventBase::HandlerFlags settings
@@ -1142,6 +1193,11 @@ class AsyncSocket : virtual public AsyncTransportWrapper {
                                          ///< The address we are connecting from
   uint32_t sendTimeout_;                 ///< The send timeout, in milliseconds
   uint16_t maxReadsPerEvent_;            ///< Max reads per event loop iteration
+
+  bool isBufferMovable_{false};
+
+  int8_t readErr_{READ_NO_ERROR}; ///< The read error encountered, if any
+
   EventBase* eventBase_;                 ///< The EventBase
   WriteTimeout writeTimeout_;            ///< A timeout for connect and write
   IoHandler ioHandler_;                  ///< A EventHandler to monitor the fd
@@ -1149,26 +1205,25 @@ class AsyncSocket : virtual public AsyncTransportWrapper {
 
   ConnectCallback* connectCallback_;     ///< ConnectCallback
   ErrMessageCallback* errMessageCallback_; ///< TimestampCallback
-  SendMsgParamsCallback*                 ///< Callback for retreaving
-      sendMsgParamCallback_;             ///< ::sendmsg() parameters
+  SendMsgParamsCallback* ///< Callback for retrieving
+      sendMsgParamCallback_; ///< ::sendmsg() parameters
   ReadCallback* readCallback_;           ///< ReadCallback
   WriteRequest* writeReqHead_;           ///< Chain of WriteRequests
   WriteRequest* writeReqTail_;           ///< End of WriteRequest chain
-  ShutdownSocketSet* shutdownSocketSet_;
+  std::weak_ptr<ShutdownSocketSet> wShutdownSocketSet_;
   size_t appBytesReceived_;              ///< Num of bytes received from socket
   size_t appBytesWritten_;               ///< Num of bytes written to socket
-  bool isBufferMovable_{false};
 
   // Pre-received data, to be returned to read callback before any data from the
   // socket.
   std::unique_ptr<IOBuf> preReceivedData_;
 
-  int8_t readErr_{READ_NO_ERROR};        ///< The read error encountered, if any
-
   std::chrono::steady_clock::time_point connectStartTime_;
   std::chrono::steady_clock::time_point connectEndTime_;
 
   std::chrono::milliseconds connectTimeout_{0};
+
+  std::unique_ptr<EvbChangeCallback> evbChangeCb_{nullptr};
 
   BufferCallback* bufferCallback_{nullptr};
   bool tfoEnabled_{false};
@@ -1178,8 +1233,8 @@ class AsyncSocket : virtual public AsyncTransportWrapper {
   bool noTSocks_{false};
   // Whether to track EOR or not.
   bool trackEor_{false};
-
-  std::unique_ptr<EvbChangeCallback> evbChangeCb_{nullptr};
+  bool zeroCopyEnabled_{false};
+  bool zeroCopyVal_{false};
 };
 #ifdef _MSC_VER
 #pragma vtordisp(pop)

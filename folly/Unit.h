@@ -43,7 +43,11 @@ struct Unit {
   template <typename T>
   struct Lift : std::conditional<std::is_same<T, void>::value, Unit, T> {};
   template <typename T>
+  using LiftT = typename Lift<T>::type;
+  template <typename T>
   struct Drop : std::conditional<std::is_same<T, Unit>::value, void, T> {};
+  template <typename T>
+  using DropT = typename Drop<T>::type;
 
   constexpr bool operator==(const Unit& /*other*/) const {
     return true;
@@ -55,4 +59,4 @@ struct Unit {
 
 constexpr Unit unit {};
 
-}
+} // namespace folly

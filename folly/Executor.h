@@ -28,7 +28,8 @@ using Func = Function<void()>;
 /// threadsafe.
 class Executor {
  public:
-  virtual ~Executor() = default;
+  // Workaround for a linkage problem with explicitly defaulted dtor t22914621
+  virtual ~Executor() {}
 
   /// Enqueue a function to executed by this executor. This and all
   /// variants must be threadsafe.
@@ -46,16 +47,6 @@ class Executor {
   static const int8_t MID_PRI = 0;
   static const int8_t HI_PRI  = SCHAR_MAX;
 
-  /// A convenience function for shared_ptr to legacy functors.
-  ///
-  /// Sometimes you have a functor that is move-only, and therefore can't be
-  /// converted to a std::function (e.g. std::packaged_task). In that case,
-  /// wrap it in a shared_ptr (or maybe folly::MoveWrapper) and use this.
-  template <class P>
-  void addPtr(P fn) {
-    this->add([fn]() mutable { (*fn)(); });
-  }
-
   class KeepAlive {
    public:
     KeepAlive() {}
@@ -66,6 +57,10 @@ class Executor {
 
     explicit operator bool() const {
       return executor_ != nullptr;
+    }
+
+    Executor* get() const {
+      return executor_.get();
     }
 
    private:
@@ -81,8 +76,7 @@ class Executor {
   };
 
   /// Returns a keep-alive token which guarantees that Executor will keep
-  /// processing tasks until the token is released. keep-alive token can only
-  /// be destroyed from within the task, scheduled to be run on an executor.
+  /// processing tasks until the token is released.
   ///
   /// If executor does not support keep-alive functionality - dummy token will
   /// be returned.
@@ -91,6 +85,7 @@ class Executor {
   }
 
  protected:
+  virtual void keepAliveAcquire();
   virtual void keepAliveRelease();
 
   KeepAlive makeKeepAlive() {

@@ -58,6 +58,20 @@ std::exception const* get_std_exception_(std::exception_ptr eptr) noexcept {
     return nullptr;
   }
 }
+} // namespace
+
+exception_wrapper exception_wrapper::from_exception_ptr(
+    std::exception_ptr const& ptr) noexcept {
+  if (!ptr) {
+    return exception_wrapper();
+  }
+  try {
+    std::rethrow_exception(ptr);
+  } catch (std::exception& e) {
+    return exception_wrapper(std::current_exception(), e);
+  } catch (...) {
+    return exception_wrapper(std::current_exception());
+  }
 }
 
 exception_wrapper::exception_wrapper(std::exception_ptr ptr) noexcept

@@ -38,6 +38,7 @@
 #include <condition_variable>
 #include <iostream>
 #include <list>
+#include <memory>
 
 namespace folly {
 
@@ -60,7 +61,7 @@ class SendMsgParamsCallbackBase :
 
   int getFlagsImpl(folly::WriteFlags flags, int /*defaultFlags*/) noexcept
                                                                      override {
-    return oldCallback_->getFlags(flags);
+    return oldCallback_->getFlags(flags, false /*zeroCopyEnabled*/);
   }
 
   void getAncillaryData(folly::WriteFlags flags, void* data) noexcept override {
@@ -88,7 +89,7 @@ class SendMsgFlagsCallback : public SendMsgParamsCallbackBase {
     if (flags_) {
       return flags_;
     } else {
-      return oldCallback_->getFlags(flags);
+      return oldCallback_->getFlags(flags, false /*zeroCopyEnabled*/);
     }
   }
 
@@ -185,7 +186,7 @@ public WriteCallbackBase {
   }
 };
 
-#ifdef MSG_ERRQUEUE
+#ifdef FOLLY_HAVE_MSG_ERRQUEUE
 /* copied from include/uapi/linux/net_tstamp.h */
 /* SO_TIMESTAMPING gets an integer bit field comprised of these values */
 enum SOF_TIMESTAMPING {
@@ -275,7 +276,7 @@ class WriteCheckTimestampCallback :
   bool gotTimestamp_{false};
   bool gotByteSeq_{false};
 };
-#endif // MSG_ERRQUEUE
+#endif // FOLLY_HAVE_MSG_ERRQUEUE
 
 class ReadCallbackBase :
 public AsyncTransportWrapper::ReadCallback {
@@ -824,13 +825,13 @@ class BlockingWriteClient :
       bufLen_(2500),
       iovCount_(2000) {
     // Fill buf_
-    buf_.reset(new uint8_t[bufLen_]);
+    buf_ = std::make_unique<uint8_t[]>(bufLen_);
     for (uint32_t n = 0; n < sizeof(buf_); ++n) {
       buf_[n] = n % 0xff;
     }
 
     // Initialize iov_
-    iov_.reset(new struct iovec[iovCount_]);
+    iov_ = std::make_unique<struct iovec[]>(iovCount_);
     for (uint32_t n = 0; n < iovCount_; ++n) {
       iov_[n].iov_base = buf_.get() + n;
       if (n & 0x1) {
@@ -885,7 +886,7 @@ class BlockingWriteServer :
     : socket_(std::move(socket)),
       bufSize_(2500 * 2000),
       bytesRead_(0) {
-    buf_.reset(new uint8_t[bufSize_]);
+    buf_ = std::make_unique<uint8_t[]>(bufSize_);
     socket_->sslAccept(this, std::chrono::milliseconds(100));
   }
 
@@ -1501,4 +1502,4 @@ class EventBaseAborter : public AsyncTimeout {
   EventBase* eventBase_;
 };
 
-}
+} // namespace folly

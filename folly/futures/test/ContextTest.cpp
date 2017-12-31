@@ -17,12 +17,19 @@
 #include <folly/futures/Future.h>
 #include <folly/portability/GTest.h>
 
+#include <memory>
+
 using namespace folly;
 
 class TestData : public RequestData {
  public:
   explicit TestData(int data) : data_(data) {}
   ~TestData() override {}
+
+  bool hasCallback() override {
+    return false;
+  }
+
   int data_;
 };
 
@@ -34,9 +41,7 @@ TEST(Context, basic) {
   EXPECT_EQ(nullptr, RequestContext::get()->getContextData("test"));
 
   // Set some test data
-  RequestContext::get()->setContextData(
-    "test",
-    std::unique_ptr<TestData>(new TestData(10)));
+  RequestContext::get()->setContextData("test", std::make_unique<TestData>(10));
 
   // Start a future
   Promise<Unit> p;

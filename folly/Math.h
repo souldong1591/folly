@@ -104,9 +104,9 @@ using IdivResultType = typename std::enable_if<
         !std::is_same<N, bool>::value &&
         !std::is_same<D, bool>::value,
     decltype(N{1} / D{1})>::type;
-}
+} // namespace detail
 
-#if defined(__arm__) && !FOLLY_A64
+#if defined(__arm__) && !FOLLY_AARCH64
 constexpr auto kIntegerDivisionGivesRemainder = false;
 #else
 constexpr auto kIntegerDivisionGivesRemainder = true;

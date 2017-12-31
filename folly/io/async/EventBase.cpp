@@ -22,15 +22,16 @@
 
 #include <fcntl.h>
 
+#include <memory>
 #include <mutex>
 #include <thread>
 
-#include <folly/Baton.h>
 #include <folly/Memory.h>
-#include <folly/ThreadName.h>
 #include <folly/io/async/NotificationQueue.h>
 #include <folly/io/async/VirtualEventBase.h>
 #include <folly/portability/Unistd.h>
+#include <folly/synchronization/Baton.h>
+#include <folly/system/ThreadName.h>
 
 namespace folly {
 
@@ -113,7 +114,6 @@ EventBase::EventBase(bool enableTimeMeasurement)
   }
   VLOG(5) << "EventBase(): Created.";
   initNotificationQueue();
-  RequestContext::saveContext();
 }
 
 // takes ownership of the event_base
@@ -139,7 +139,6 @@ EventBase::EventBase(event_base* evb, bool enableTimeMeasurement)
     throw std::invalid_argument("EventBase(): event base cannot be nullptr");
   }
   initNotificationQueue();
-  RequestContext::saveContext();
 }
 
 EventBase::~EventBase() {
@@ -552,7 +551,6 @@ bool EventBase::runInEventBaseThread(Func fn) {
   if (inRunningEventBaseThread()) {
     runInLoop(std::move(fn));
     return true;
-
   }
 
   try {
@@ -566,7 +564,7 @@ bool EventBase::runInEventBaseThread(Func fn) {
   return true;
 }
 
-bool EventBase::runInEventBaseThreadAndWait(FuncRef fn) {
+bool EventBase::runInEventBaseThreadAndWait(Func fn) {
   if (inRunningEventBaseThread()) {
     LOG(ERROR) << "EventBase " << this << ": Waiting in the event loop is not "
                << "allowed";
@@ -574,18 +572,20 @@ bool EventBase::runInEventBaseThreadAndWait(FuncRef fn) {
   }
 
   Baton<> ready;
-  runInEventBaseThread([&] {
+  runInEventBaseThread([&ready, fn = std::move(fn)]() mutable {
     SCOPE_EXIT {
       ready.post();
     };
-    fn();
+    // A trick to force the stored functor to be executed and then destructed
+    // before posting the baton and waking the waiting thread.
+    copy(std::move(fn))();
   });
   ready.wait();
 
   return true;
 }
 
-bool EventBase::runImmediatelyOrRunInEventBaseThreadAndWait(FuncRef fn) {
+bool EventBase::runImmediatelyOrRunInEventBaseThreadAndWait(Func fn) {
   if (isInEventBaseThread()) {
     fn();
     return true;
@@ -612,7 +612,7 @@ bool EventBase::runLoopCallbacks() {
     while (!currentCallbacks.empty()) {
       LoopCallback* callback = &currentCallbacks.front();
       currentCallbacks.pop_front();
-      folly::RequestContextScopeGuard rctx(callback->context_);
+      folly::RequestContextScopeGuard rctx(std::move(callback->context_));
       callback->runLoopCallback();
     }
 
@@ -624,12 +624,12 @@ bool EventBase::runLoopCallbacks() {
 
 void EventBase::initNotificationQueue() {
   // Infinite size queue
-  queue_.reset(new NotificationQueue<Func>());
+  queue_ = std::make_unique<NotificationQueue<Func>>();
 
   // We allocate fnRunner_ separately, rather than declaring it directly
   // as a member of EventBase solely so that we don't need to include
   // NotificationQueue.h from EventBase.h
-  fnRunner_.reset(new FunctionRunner());
+  fnRunner_ = std::make_unique<FunctionRunner>();
 
   // Mark this as an internal event, so event_base_loop() will return if
   // there are no other events besides this one installed.

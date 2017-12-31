@@ -23,11 +23,11 @@
 #include <type_traits>
 
 #include <boost/noncopyable.hpp>
-#include <folly/AtomicStruct.h>
 #include <folly/Portability.h>
 #include <folly/concurrency/CacheLocality.h>
 #include <folly/portability/SysMman.h>
 #include <folly/portability/Unistd.h>
+#include <folly/synchronization/AtomicStruct.h>
 
 // Ignore shadowing warnings within this file, so includers can use -Wshadow.
 FOLLY_PUSH_WARNING
@@ -38,7 +38,7 @@ namespace folly {
 namespace detail {
 template <typename Pool>
 struct IndexedMemPoolRecycler;
-}
+} // namespace detail
 
 template <
     typename T,
@@ -351,7 +351,7 @@ struct IndexedMemPool : boost::noncopyable {
     }
   };
 
-  struct FOLLY_ALIGN_TO_AVOID_FALSE_SHARING LocalList {
+  struct alignas(hardware_destructive_interference_size) LocalList {
     AtomicStruct<TaggedPtr,Atom> head;
 
     LocalList() : head(TaggedPtr{}) {}
@@ -377,7 +377,7 @@ struct IndexedMemPool : boost::noncopyable {
 
   /// raw storage, only 1..min(size_,actualCapacity_) (inclusive) are
   /// actually constructed.  Note that slots_[0] is not constructed or used
-  FOLLY_ALIGN_TO_AVOID_FALSE_SHARING Slot* slots_;
+  alignas(hardware_destructive_interference_size) Slot* slots_;
 
   /// use AccessSpreader to find your list.  We use stripes instead of
   /// thread-local to avoid the need to grow or shrink on thread start
@@ -386,7 +386,8 @@ struct IndexedMemPool : boost::noncopyable {
 
   /// this is the head of a list of node chained by globalNext, that are
   /// themselves each the head of a list chained by localNext
-  FOLLY_ALIGN_TO_AVOID_FALSE_SHARING AtomicStruct<TaggedPtr,Atom> globalHead_;
+  alignas(hardware_destructive_interference_size)
+      AtomicStruct<TaggedPtr, Atom> globalHead_;
 
   ///////////// private methods
 
@@ -506,6 +507,9 @@ struct IndexedMemPool : boost::noncopyable {
   void markAllocated(Slot& slot) {
     slot.localNext.store(uint32_t(-1), std::memory_order_release);
   }
+
+ public:
+  static constexpr std::size_t kSlotSize = sizeof(Slot);
 };
 
 namespace detail {
@@ -529,7 +533,7 @@ struct IndexedMemPoolRecycler {
   }
 };
 
-}
+} // namespace detail
 
 } // namespace folly
 

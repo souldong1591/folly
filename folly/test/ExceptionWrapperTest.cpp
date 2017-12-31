@@ -209,6 +209,28 @@ TEST(ExceptionWrapper, get_or_make_exception_ptr_test) {
   EXPECT_FALSE(eptr);
 }
 
+TEST(ExceptionWrapper, from_exception_ptr_empty) {
+  auto ep = std::exception_ptr();
+  auto ew = exception_wrapper::from_exception_ptr(ep);
+  EXPECT_FALSE(bool(ew));
+}
+
+TEST(ExceptionWrapper, from_exception_ptr_exn) {
+  auto ep = std::make_exception_ptr(std::runtime_error("foo"));
+  auto ew = exception_wrapper::from_exception_ptr(ep);
+  EXPECT_TRUE(bool(ew));
+  EXPECT_EQ(ep, ew.to_exception_ptr());
+  EXPECT_TRUE(ew.is_compatible_with<std::runtime_error>());
+}
+
+TEST(ExceptionWrapper, from_exception_ptr_any) {
+  auto ep = std::make_exception_ptr<int>(12);
+  auto ew = exception_wrapper::from_exception_ptr(ep);
+  EXPECT_TRUE(bool(ew));
+  EXPECT_EQ(ep, ew.to_exception_ptr());
+  EXPECT_TRUE(ew.is_compatible_with<int>());
+}
+
 TEST(ExceptionWrapper, with_exception_ptr_empty) {
   auto ew = exception_wrapper(std::exception_ptr());
   EXPECT_EQ(exception_wrapper::none(), ew.type());
@@ -232,6 +254,7 @@ TEST(ExceptionWrapper, with_shared_ptr_test) {
   EXPECT_EQ(typeid(std::runtime_error), ew.type());
   EXPECT_NE(nullptr, ew.get_exception());
   EXPECT_NE(nullptr, ew.get_exception<std::exception>());
+  EXPECT_STREQ("foo", ew.get_exception<std::exception>()->what());
   EXPECT_EQ(nullptr, ew.get_exception<int>());
   EXPECT_FALSE(ew.has_exception_ptr());
   EXPECT_NE(nullptr, ew.to_exception_ptr());
@@ -264,6 +287,7 @@ TEST(ExceptionWrapper, with_exception_ptr_exn_test) {
   EXPECT_EQ(typeid(std::runtime_error), ew.type());
   EXPECT_NE(nullptr, ew.get_exception());
   EXPECT_NE(nullptr, ew.get_exception<std::exception>());
+  EXPECT_STREQ("foo", ew.get_exception<std::exception>()->what());
   EXPECT_EQ(nullptr, ew.get_exception<int>());
   EXPECT_TRUE(ew.has_exception_ptr());
   EXPECT_EQ(ep, ew.to_exception_ptr());
@@ -296,6 +320,7 @@ TEST(ExceptionWrapper, with_exception_ptr_any_test) {
   EXPECT_EQ(nullptr, ew.get_exception());
   EXPECT_EQ(nullptr, ew.get_exception<std::exception>());
   EXPECT_NE(nullptr, ew.get_exception<int>());
+  EXPECT_EQ(12, *ew.get_exception<int>());
   EXPECT_TRUE(ew.has_exception_ptr());
   EXPECT_EQ(ep, ew.to_exception_ptr());
   EXPECT_TRUE(ew.has_exception_ptr());
@@ -326,7 +351,8 @@ TEST(ExceptionWrapper, with_non_std_exception_test) {
   EXPECT_EQ(nullptr, ew.get_exception());
   EXPECT_EQ(nullptr, ew.get_exception<std::exception>());
   EXPECT_NE(nullptr, ew.get_exception<int>());
-  EXPECT_FALSE(ew.has_exception_ptr());
+  EXPECT_EQ(42, *ew.get_exception<int>());
+  EXPECT_TRUE(ew.has_exception_ptr());
   EXPECT_EQ("int", ew.class_name());
   EXPECT_EQ("int", ew.what());
   EXPECT_NE(nullptr, ew.to_exception_ptr());
@@ -359,6 +385,7 @@ TEST(ExceptionWrapper, with_exception_ptr_any_nil_test) {
   EXPECT_EQ(nullptr, ew.get_exception());
   EXPECT_EQ(nullptr, ew.get_exception<std::exception>());
   EXPECT_NE(nullptr, ew.get_exception<int>());
+  EXPECT_EQ(12, *ew.get_exception<int>());
   EXPECT_EQ(ep, ew.to_exception_ptr());
   EXPECT_EQ("<unknown exception>", ew.class_name()); // because concrete type is
   // erased
@@ -412,7 +439,7 @@ TEST(ExceptionWrapper, with_exception_deduction_returning) {
 namespace {
 template <typename T>
 T& r_to_l(T v) { return std::ref(v); }
-}
+} // namespace
 
 TEST(ExceptionWrapper, with_exception_deduction_functor_lvalue) {
   auto ew = make_exception_wrapper<std::runtime_error>("hi");
@@ -479,7 +506,7 @@ exception_wrapper testNonStdException() {
     return exception_wrapper{std::current_exception(), e};
   }
 }
-}
+} // namespace
 
 TEST(ExceptionWrapper, base_derived_non_std_exception_test) {
   auto ew = testNonStdException();
@@ -497,7 +524,7 @@ struct BigRuntimeError : std::runtime_error {
 struct BigNonStdError {
   char data_[sizeof(exception_wrapper) + 1]{};
 };
-}
+} // namespace
 
 TEST(ExceptionWrapper, handle_std_exception) {
   auto ep = std::make_exception_ptr(std::runtime_error{"hello world"});

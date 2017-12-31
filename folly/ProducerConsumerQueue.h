@@ -167,15 +167,22 @@ struct ProducerConsumerQueue {
     return ret;
   }
 
+  // maximum number of items in the queue.
+  size_t capacity() const {
+    return size_ - 1;
+  }
+
  private:
-  char pad0_[CacheLocality::kFalseSharingRange];
+  char pad0_[hardware_destructive_interference_size];
   const uint32_t size_;
   T* const records_;
 
-  FOLLY_ALIGN_TO_AVOID_FALSE_SHARING std::atomic<unsigned int> readIndex_;
-  FOLLY_ALIGN_TO_AVOID_FALSE_SHARING std::atomic<unsigned int> writeIndex_;
+  alignas(hardware_destructive_interference_size)
+      std::atomic<unsigned int> readIndex_;
+  alignas(hardware_destructive_interference_size)
+      std::atomic<unsigned int> writeIndex_;
 
-  char pad1_[CacheLocality::kFalseSharingRange - sizeof(writeIndex_)];
+  char pad1_[hardware_destructive_interference_size - sizeof(writeIndex_)];
 };
 
-}
+} // namespace folly

@@ -16,6 +16,7 @@
 
 #include <folly/Optional.h>
 #include <folly/Portability.h>
+#include <folly/portability/GMock.h>
 #include <folly/portability/GTest.h>
 
 #include <algorithm>
@@ -63,6 +64,28 @@ TEST(Optional, NoDefault) {
   EXPECT_TRUE(bool(x));
   x.clear();
   EXPECT_FALSE(x);
+}
+
+TEST(Optional, Emplace) {
+  Optional<std::vector<int>> opt;
+  auto& values1 = opt.emplace(3, 4);
+  EXPECT_THAT(values1, testing::ElementsAre(4, 4, 4));
+  auto& values2 = opt.emplace(2, 5);
+  EXPECT_THAT(values2, testing::ElementsAre(5, 5));
+}
+
+TEST(Optional, EmplaceInitializerList) {
+  Optional<std::vector<int>> opt;
+  auto& values1 = opt.emplace({3, 4, 5});
+  EXPECT_THAT(values1, testing::ElementsAre(3, 4, 5));
+  auto& values2 = opt.emplace({4, 5, 6});
+  EXPECT_THAT(values2, testing::ElementsAre(4, 5, 6));
+}
+
+TEST(Optional, Reset) {
+  Optional<int> opt(3);
+  opt.reset();
+  EXPECT_FALSE(opt);
 }
 
 TEST(Optional, String) {
@@ -223,10 +246,10 @@ TEST(Optional, Unique) {
 
   opt.clear();
   // empty->moved
-  opt = unique_ptr<int>(new int(6));
+  opt = std::make_unique<int>(6);
   EXPECT_EQ(6, **opt);
   // full->moved
-  opt = unique_ptr<int>(new int(7));
+  opt = std::make_unique<int>(7);
   EXPECT_EQ(7, **opt);
 
   // move it out by move construct
@@ -318,6 +341,10 @@ TEST(Optional, Swap) {
   EXPECT_EQ("bye", a.value());
 
   swap(a, b);
+  EXPECT_TRUE(a.hasValue());
+  EXPECT_TRUE(b.hasValue());
+  EXPECT_EQ("hello", a.value());
+  EXPECT_EQ("bye", b.value());
 }
 
 TEST(Optional, Comparisons) {
@@ -663,4 +690,4 @@ TEST(Optional, Hash) {
   std::hash<Optional<int>>()(none);
   std::hash<Optional<int>>()(3);
 }
-}
+} // namespace folly

@@ -19,6 +19,7 @@
 #include <atomic>
 #include <thread>
 
+#include <folly/executors/InlineExecutor.h>
 #include <folly/futures/FutureException.h>
 #include <folly/futures/detail/Core.h>
 
@@ -76,18 +77,26 @@ Promise<T>::~Promise() {
 template <class T>
 void Promise<T>::detach() {
   if (core_) {
-    if (!retrieved_)
+    if (!retrieved_) {
       core_->detachFuture();
+    }
     core_->detachPromise();
     core_ = nullptr;
   }
 }
 
 template <class T>
-Future<T> Promise<T>::getFuture() {
+SemiFuture<T> Promise<T>::getSemiFuture() {
   throwIfRetrieved();
   retrieved_ = true;
-  return Future<T>(core_);
+  return SemiFuture<T>(core_);
+}
+
+template <class T>
+Future<T> Promise<T>::getFuture() {
+  // An InlineExecutor approximates the old behaviour of continuations
+  // running inine on setting the value of the promise.
+  return getSemiFuture().via(&InlineExecutor::instance());
 }
 
 template <class T>
@@ -99,13 +108,7 @@ Promise<T>::setException(E const& e) {
 
 template <class T>
 void Promise<T>::setException(std::exception_ptr const& ep) {
-  try {
-    std::rethrow_exception(ep);
-  } catch (const std::exception& e) {
-    setException(exception_wrapper(std::current_exception(), e));
-  } catch (...) {
-    setException(exception_wrapper(std::current_exception()));
-  }
+  setException(exception_wrapper::from_exception_ptr(ep));
 }
 
 template <class T>
@@ -150,4 +153,4 @@ bool Promise<T>::isFulfilled() const noexcept {
   return true;
 }
 
-}
+} // namespace folly

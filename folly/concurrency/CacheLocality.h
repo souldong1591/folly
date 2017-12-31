@@ -28,14 +28,15 @@
 #include <unordered_map>
 #include <vector>
 
-#include <folly/Hash.h>
 #include <folly/Indestructible.h>
 #include <folly/Likely.h>
 #include <folly/Memory.h>
 #include <folly/Portability.h>
-#include <folly/ThreadId.h>
+#include <folly/hash/Hash.h>
+#include <folly/lang/Align.h>
 #include <folly/portability/BitsFunctexcept.h>
 #include <folly/portability/Memory.h>
+#include <folly/system/ThreadId.h>
 
 namespace folly {
 
@@ -115,26 +116,7 @@ struct CacheLocality {
   /// CacheLocality structure with the specified number of cpus and a
   /// single cache level that associates one cpu per cache.
   static CacheLocality uniform(size_t numCpus);
-
-  enum {
-    /// Memory locations on the same cache line are subject to false
-    /// sharing, which is very bad for performance.  Microbenchmarks
-    /// indicate that pairs of cache lines also see interference under
-    /// heavy use of atomic operations (observed for atomic increment on
-    /// Sandy Bridge).  See FOLLY_ALIGN_TO_AVOID_FALSE_SHARING
-    kFalseSharingRange = 128
-  };
-
-  static_assert(
-      kFalseSharingRange == 128,
-      "FOLLY_ALIGN_TO_AVOID_FALSE_SHARING should track kFalseSharingRange");
 };
-
-// TODO replace __attribute__ with alignas and 128 with kFalseSharingRange
-
-/// An attribute that will cause a variable or field to be aligned so that
-/// it doesn't have false sharing with anything at a smaller memory address.
-#define FOLLY_ALIGN_TO_AVOID_FALSE_SHARING FOLLY_ALIGNED(128)
 
 /// Knows how to derive a function pointer to the VDSO implementation of
 /// getcpu(2), if available
@@ -390,7 +372,7 @@ class SimpleAllocator {
     if (intptr_t(mem_) % 128 == 0) {
       // Avoid allocating pointers that may look like malloc
       // pointers.
-      mem_ += std::min(sz_, folly::max_align_v);
+      mem_ += std::min(sz_, max_align_v);
     }
     if (mem_ && (mem_ + sz_ <= end_)) {
       auto mem = mem_;
@@ -450,14 +432,11 @@ class CoreAllocator {
     void* allocate(size_t size) {
       auto cl = sizeClass(size);
       if (cl == 4) {
-        static_assert(
-            CacheLocality::kFalseSharingRange == 128,
-            "kFalseSharingRange changed");
         // Align to a cacheline
-        size = size + (CacheLocality::kFalseSharingRange - 1);
-        size &= ~size_t(CacheLocality::kFalseSharingRange - 1);
-        void* mem =
-            detail::aligned_malloc(size, CacheLocality::kFalseSharingRange);
+        size = size + (hardware_destructive_interference_size - 1);
+        size &= ~size_t(hardware_destructive_interference_size - 1);
+        void* mem = detail::aligned_malloc(
+            size, hardware_destructive_interference_size);
         if (!mem) {
           std::__throw_bad_alloc();
         }

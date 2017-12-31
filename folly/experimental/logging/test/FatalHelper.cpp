@@ -19,10 +19,6 @@
 #include <folly/portability/Stdlib.h>
 
 DEFINE_string(logging, "", "Logging category configuration string");
-DEFINE_string(
-    handler_style,
-    "async",
-    "Log handler style: async, immediate, or none");
 
 DEFINE_string(
     category,
@@ -57,18 +53,10 @@ class InitChecker {
 };
 
 static InitChecker initChecker;
-}
+} // namespace
 
 namespace {
 int runHelper() {
-  if (FLAGS_handler_style == "async") {
-    initLoggingGlogStyle(FLAGS_logging, LogLevel::INFO, true);
-  } else if (FLAGS_handler_style == "immediate") {
-    initLoggingGlogStyle(FLAGS_logging, LogLevel::INFO, false);
-  } else if (FLAGS_handler_style != "none") {
-    XLOGF(FATAL, "unknown log handler style \"{}\"", FLAGS_handler_style);
-  }
-
   if (!FLAGS_category.empty()) {
     folly::Logger logger{FLAGS_category};
     FB_LOG(logger, FATAL, "crashing to category ", FLAGS_category);
@@ -83,7 +71,7 @@ int runHelper() {
   // should be able to detect that XLOG(FATAL) never returns.  It shouldn't
   // complain that we don't return an integer here.
 }
-}
+} // namespace
 
 std::string fbLogFatalCheck() {
   folly::Logger logger("some.category");
@@ -98,6 +86,7 @@ std::string fbLogFatalCheck() {
 int main(int argc, char* argv[]) {
   // Call folly::init() and then initialize log levels and handlers
   folly::init(&argc, &argv);
+  folly::initLogging(FLAGS_logging);
 
   // Do most of the work in a separate helper function.
   //

@@ -54,7 +54,6 @@ namespace folly {
 class HHWheelTimer : private folly::AsyncTimeout,
                      public folly::DelayedDestruction {
  public:
-  // This type has always been a misnomer, because it is not a unique pointer.
   using UniquePtr = std::unique_ptr<HHWheelTimer, Destructor>;
   using SharedPtr = std::shared_ptr<HHWheelTimer>;
 
@@ -103,6 +102,15 @@ class HHWheelTimer : private folly::AsyncTimeout,
      */
     bool isScheduled() const {
       return wheel_ != nullptr;
+    }
+
+    /**
+     * Get the time remaining until this timeout expires. Return 0 if this
+     * timeout is not scheduled or expired. Otherwise, return expiration time
+     * minus getCurTime().
+     */
+    std::chrono::milliseconds getTimeRemaining() {
+      return getTimeRemaining(getCurTime());
     }
 
    protected:

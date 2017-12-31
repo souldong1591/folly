@@ -58,7 +58,9 @@ class SWMRListSet {
   void locate_lower_bound(const T& v, std::atomic<Node*>*& prev) const {
     auto curr = prev->load(std::memory_order_relaxed);
     while (curr) {
-      if (curr->elem_ >= v) break;
+      if (curr->elem_ >= v) {
+        break;
+      }
       prev = &(curr->next_);
       curr = curr->next_.load(std::memory_order_relaxed);
     }
@@ -78,7 +80,9 @@ class SWMRListSet {
     auto prev = &head_;
     locate_lower_bound(v, prev);
     auto curr = prev->load(std::memory_order_relaxed);
-    if (curr && curr->elem_ == v) return false;
+    if (curr && curr->elem_ == v) {
+      return false;
+    }
     prev->store(new Node(std::move(v), curr));
     return true;
   }
@@ -87,7 +91,9 @@ class SWMRListSet {
     auto prev = &head_;
     locate_lower_bound(v, prev);
     auto curr = prev->load(std::memory_order_relaxed);
-    if (!curr || curr->elem_ != v) return false;
+    if (!curr || curr->elem_ != v) {
+      return false;
+    }
     Node *curr_next = curr->next_.load();
     // Patch up the actual list...
     prev->store(curr_next, std::memory_order_release);
@@ -99,19 +105,22 @@ class SWMRListSet {
 
   /* Used by readers */
   bool contains(const T& val) const {
-    /* Acquire two hazard pointers for hand-over-hand traversal. */
-    hazptr_holder hptr_prev;
-    hazptr_holder hptr_curr;
+    /* Two hazard pointers for hand-over-hand traversal. */
+    hazptr_local<2> hptr;
+    hazptr_holder* hptr_prev = &hptr[0];
+    hazptr_holder* hptr_curr = &hptr[1];
     while (true) {
       auto prev = &head_;
       auto curr = prev->load(std::memory_order_acquire);
       while (true) {
         if (!curr) { return false; }
-        if (!hptr_curr.try_protect(curr, *prev))
+        if (!hptr_curr->try_protect(curr, *prev)) {
           break;
+        }
         auto next = curr->next_.load(std::memory_order_acquire);
-        if (prev->load(std::memory_order_acquire) != curr)
+        if (prev->load(std::memory_order_acquire) != curr) {
           break;
+        }
         if (curr->elem_ == val) {
             return true;
         } else if (!(curr->elem_ < val)) {
@@ -119,22 +128,11 @@ class SWMRListSet {
         }
         prev = &(curr->next_);
         curr = next;
-        /* Swap does not change the values of the owned hazard
-         * pointers themselves. After the swap, The hazard pointer
-         * owned by hptr_prev continues to protect the node that
-         * contains the pointer *prev. The hazard pointer owned by
-         * hptr_curr will continue to protect the node that contains
-         * the old *prev (unless the old prev was &head), which no
-         * longer needs protection, so hptr_curr's hazard pointer is
-         * now free to protect *curr in the next iteration (if curr !=
-         * null).
-         */
-        swap(hptr_curr, hptr_prev);
+        std::swap(hptr_curr, hptr_prev);
       }
     }
-    /* The hazard pointers are released automatically. */
   }
 };
 
-} // namespace folly
 } // namespace hazptr
+} // namespace folly

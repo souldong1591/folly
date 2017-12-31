@@ -19,11 +19,11 @@
 #include <atomic>
 #include <chrono>
 
-#include <folly/AtomicStruct.h>
-#include <folly/Hash.h>
-#include <folly/ThreadId.h>
 #include <folly/Traits.h>
 #include <folly/detail/Futex.h>
+#include <folly/hash/Hash.h>
+#include <folly/synchronization/AtomicStruct.h>
+#include <folly/system/ThreadId.h>
 
 namespace folly {
 
@@ -33,7 +33,7 @@ template <>
 struct IsTriviallyCopyable<std::chrono::steady_clock::duration>
   : std::true_type {};
 
-}
+} // namespace folly
 
 namespace folly { namespace detail {
 
@@ -150,4 +150,5 @@ struct MemoryIdler {
   }
 };
 
-}} // namespace folly::detail
+} // namespace detail
+} // namespace folly

@@ -16,6 +16,7 @@
 
 #include <folly/AtomicUnorderedMap.h>
 
+#include <memory>
 #include <thread>
 #include <unordered_map>
 
@@ -108,7 +109,7 @@ using UIM =
 namespace {
 template <typename T>
 struct AtomicUnorderedInsertMapTest : public ::testing::Test {};
-}
+} // namespace
 
 // uint16_t doesn't make sense for most platforms, but we might as well
 // test it
@@ -207,7 +208,7 @@ BENCHMARK(lookup_int_int_hit, iters) {
   size_t capacity = 100000;
 
   BENCHMARK_SUSPEND {
-    ptr.reset(new AtomicUnorderedInsertMap<int,size_t>(capacity));
+    ptr = std::make_unique<AtomicUnorderedInsertMap<int, size_t>>(capacity);
     for (size_t i = 0; i < capacity; ++i) {
       auto k = 3 * ((5641 * i) % capacity);
       ptr->emplace(k, k + 1);
@@ -249,7 +250,7 @@ void contendedRW(size_t itersPerThread,
   std::vector<std::thread> threads;
 
   BENCHMARK_SUSPEND {
-    ptr.reset(new Map(capacity));
+    ptr = std::make_unique<Map>(capacity);
     while (threads.size() < numThreads) {
       threads.emplace_back([&](){
         while (!go) {

@@ -16,9 +16,9 @@
 
 #pragma once
 
-#include <folly/Foreach.h>
 #include <folly/Random.h>
 #include <folly/Synchronized.h>
+#include <folly/container/Foreach.h>
 #include <folly/portability/GTest.h>
 #include <glog/logging.h>
 #include <algorithm>
@@ -763,7 +763,7 @@ template <class Mutex> void testTimedSynchronized() {
     v->push_back(2 * threadIdx);
 
     // Aaand test the TIMED_SYNCHRONIZED macro
-    for (;;)
+    for (;;) {
       TIMED_SYNCHRONIZED(5, lv, v) {
         if (lv) {
           // Sleep for a random time to ensure we trigger timeouts
@@ -776,6 +776,7 @@ template <class Mutex> void testTimedSynchronized() {
 
         ++(*numTimeouts.contextualLock());
       }
+    }
   };
 
   static const size_t numThreads = 100;
@@ -876,5 +877,5 @@ template <class Mutex> void testInPlaceConstruction() {
   // This won't compile without in_place
   folly::Synchronized<NotCopiableNotMovable> a(folly::in_place, 5, "a");
 }
-}
-}
+} // namespace sync_tests
+} // namespace folly

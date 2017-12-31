@@ -20,13 +20,12 @@
 #include <memory>
 #include <mutex>
 
-#include <folly/Baton.h>
 #include <folly/experimental/flat_combining/FlatCombining.h>
+#include <folly/synchronization/Baton.h>
 
 namespace folly {
 
-struct Line {
-  FOLLY_ALIGN_TO_AVOID_FALSE_SHARING
+struct alignas(hardware_destructive_interference_size) Line {
   uint64_t val_;
 };
 

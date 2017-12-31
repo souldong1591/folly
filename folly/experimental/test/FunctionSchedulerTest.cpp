@@ -13,15 +13,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <random>
 
-#include <folly/Baton.h>
+#include <boost/thread.hpp>
+
 #include <folly/Random.h>
 #include <folly/experimental/FunctionScheduler.h>
 #include <folly/portability/GTest.h>
+#include <folly/synchronization/Baton.h>
 
 #if defined(__linux__)
 #include <dlfcn.h>
@@ -247,6 +250,52 @@ TEST(FunctionScheduler, ResetFunc) {
   delay(1);
   // t4.5: add2 should have been invoked once more (it was reset at t1)
   EXPECT_EQ(12, total);
+}
+
+TEST(FunctionScheduler, ResetFuncWhileRunning) {
+  struct State {
+    boost::barrier barrier_a{2};
+    boost::barrier barrier_b{2};
+    boost::barrier barrier_c{2};
+    boost::barrier barrier_d{2};
+    bool set = false;
+    size_t count = 0;
+  };
+
+  State state; // held by ref
+  auto mv = std::make_shared<size_t>(); // gets moved
+
+  FunctionScheduler fs;
+  fs.addFunction(
+      [&, mv /* ref + shared_ptr fit in in-situ storage */] {
+        if (!state.set) { // first invocation
+          state.barrier_a.wait();
+          // ensure that resetFunctionTimer is called in this critical section
+          state.barrier_b.wait();
+          ++state.count;
+          EXPECT_TRUE(bool(mv)) << "bug repro: mv was moved-out";
+          state.barrier_c.wait();
+          // main thread checks count here
+          state.barrier_d.wait();
+        } else { // subsequent invocations
+          ++state.count;
+        }
+      },
+      testInterval(3),
+      "nada");
+  fs.start();
+
+  state.barrier_a.wait();
+  state.set = true;
+  fs.resetFunctionTimer("nada");
+  EXPECT_EQ(0, state.count) << "sanity check";
+  state.barrier_b.wait();
+  // fn thread increments count and checks mv here
+  state.barrier_c.wait();
+  EXPECT_EQ(1, state.count) << "sanity check";
+  state.barrier_d.wait();
+  delay(1);
+  EXPECT_EQ(2, state.count) << "sanity check";
 }
 
 TEST(FunctionScheduler, AddInvalid) {
@@ -580,7 +629,7 @@ TEST(FunctionScheduler, CancelAndWaitOnRunningFunc) {
     baton.post();
   });
 
-  ASSERT_TRUE(baton.timed_wait(testInterval(15)));
+  ASSERT_TRUE(baton.try_wait_for(testInterval(15)));
   th.join();
 }
 
@@ -595,7 +644,7 @@ TEST(FunctionScheduler, CancelAllAndWaitWithRunningFunc) {
     baton.post();
   });
 
-  ASSERT_TRUE(baton.timed_wait(testInterval(15)));
+  ASSERT_TRUE(baton.try_wait_for(testInterval(15)));
   th.join();
 }
 
@@ -626,7 +675,7 @@ TEST(FunctionScheduler, CancelAllAndWaitWithOneRunningAndOneWaiting) {
     baton.post();
   });
 
-  ASSERT_TRUE(baton.timed_wait(testInterval(15)));
+  ASSERT_TRUE(baton.try_wait_for(testInterval(15)));
   th.join();
 }
 

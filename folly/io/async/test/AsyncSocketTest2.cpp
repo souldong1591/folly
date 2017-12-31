@@ -16,6 +16,7 @@
 
 #include <folly/io/async/test/AsyncSocketTest2.h>
 
+#include <folly/ConstexprMath.h>
 #include <folly/ExceptionWrapper.h>
 #include <folly/Random.h>
 #include <folly/SocketAddress.h>
@@ -1139,13 +1140,13 @@ TEST(AsyncSocketTest, WriteAfterReadEOF) {
  */
 TEST(AsyncSocketTest, WriteErrorCallbackBytesWritten) {
   // Send and receive buffer sizes for the sockets.
-  const int sockBufSize = 8 * 1024;
+  constexpr size_t kSockBufSize = 8 * 1024;
 
-  TestServer server(false, sockBufSize);
+  TestServer server(false, kSockBufSize);
 
   AsyncSocket::OptionMap options{
-      {{SOL_SOCKET, SO_SNDBUF}, sockBufSize},
-      {{SOL_SOCKET, SO_RCVBUF}, sockBufSize},
+      {{SOL_SOCKET, SO_SNDBUF}, kSockBufSize},
+      {{SOL_SOCKET, SO_RCVBUF}, kSockBufSize},
       {{IPPROTO_TCP, TCP_NODELAY}, 1},
   };
 
@@ -1172,32 +1173,47 @@ TEST(AsyncSocketTest, WriteErrorCallbackBytesWritten) {
   // bytes are written when the socket is reset. Having at least 3 writes
   // ensures that the total size (45KB) would be exceeed in case of overcounting
   // based on the initial write size of 16KB.
-  constexpr size_t sendSize = 45 * 1024;
-  auto const sendBuf = std::vector<char>(sendSize, 'a');
+  constexpr size_t kSendSize = 45 * 1024;
+  auto const sendBuf = std::vector<char>(kSendSize, 'a');
 
   WriteCallback wcb;
 
   senderEvb.runInEventBaseThreadAndWait(
-      [&]() { socket->write(&wcb, sendBuf.data(), sendSize); });
+      [&]() { socket->write(&wcb, sendBuf.data(), kSendSize); });
 
   // Reading 20KB would cause three additional writes of 8KB, but less
   // than 45KB total, so the socket is reset before all bytes are written.
-  constexpr size_t recvSize = 20 * 1024;
-  uint8_t recvBuf[recvSize];
+  constexpr size_t kRecvSize = 20 * 1024;
+  uint8_t recvBuf[kRecvSize];
   int bytesRead = acceptedSocket->readAll(recvBuf, sizeof(recvBuf));
+  ASSERT_EQ(kRecvSize, bytesRead);
 
+  constexpr size_t kMinExpectedBytesWritten = // 20 ACK + 8 send buf
+      kRecvSize + kSockBufSize;
+  static_assert(kMinExpectedBytesWritten == 28 * 1024, "bad math");
+  static_assert(kMinExpectedBytesWritten > kRecvSize, "bad math");
+
+  constexpr size_t kMaxExpectedBytesWritten = // 24 ACK + 8 sent + 8 send buf
+      constexpr_ceil(kRecvSize, kSockBufSize) + 2 * kSockBufSize;
+  static_assert(kMaxExpectedBytesWritten == 40 * 1024, "bad math");
+  static_assert(kMaxExpectedBytesWritten < kSendSize, "bad math");
+
+  // Need to delay after receiving 20KB and before closing the receive side so
+  // that the send side has a chance to fill the send buffer past.
+  using clock = std::chrono::steady_clock;
+  auto const deadline = clock::now() + std::chrono::seconds(2);
+  while (wcb.bytesWritten < kMinExpectedBytesWritten &&
+         clock::now() < deadline) {
+    std::this_thread::yield();
+  }
   acceptedSocket->closeWithReset();
 
   senderEvb.terminateLoopSoon();
   senderThread.join();
 
-  LOG(INFO) << "Bytes written: " << wcb.bytesWritten;
-
   ASSERT_EQ(STATE_FAILED, wcb.state);
-  ASSERT_GE(wcb.bytesWritten, bytesRead);
-  ASSERT_LE(wcb.bytesWritten, sendSize);
-  ASSERT_EQ(recvSize, bytesRead);
-  ASSERT(32 * 1024 == wcb.bytesWritten || 40 * 1024 == wcb.bytesWritten);
+  ASSERT_LE(kMinExpectedBytesWritten, wcb.bytesWritten);
+  ASSERT_GE(kMaxExpectedBytesWritten, wcb.bytesWritten);
 }
 
 /**
@@ -2857,7 +2873,40 @@ TEST(AsyncSocketTest, EvbCallbacks) {
   socket->attachEventBase(&evb);
 }
 
-#ifdef MSG_ERRQUEUE
+TEST(AsyncSocketTest, TestEvbDetachWtRegisteredIOHandlers) {
+  // Start listening on a local port
+  TestServer server;
+
+  // Connect using a AsyncSocket
+  EventBase evb;
+  std::shared_ptr<AsyncSocket> socket = AsyncSocket::newSocket(&evb);
+  ConnCallback cb;
+  socket->connect(&cb, server.getAddress(), 30);
+
+  evb.loop();
+
+  ASSERT_EQ(cb.state, STATE_SUCCEEDED);
+  EXPECT_LE(0, socket->getConnectTime().count());
+  EXPECT_EQ(socket->getConnectTimeout(), std::chrono::milliseconds(30));
+
+  // After the ioHandlers are registered, still should be able to detach/attach
+  ReadCallback rcb;
+  socket->setReadCB(&rcb);
+
+  auto cbEvbChg = std::make_unique<MockEvbChangeCallback>();
+  InSequence seq;
+  EXPECT_CALL(*cbEvbChg, evbDetached(socket.get())).Times(1);
+  EXPECT_CALL(*cbEvbChg, evbAttached(socket.get())).Times(1);
+
+  socket->setEvbChangedCallback(std::move(cbEvbChg));
+  EXPECT_TRUE(socket->isDetachable());
+  socket->detachEventBase();
+  socket->attachEventBase(&evb);
+
+  socket->close();
+}
+
+#ifdef FOLLY_HAVE_MSG_ERRQUEUE
 /* copied from include/uapi/linux/net_tstamp.h */
 /* SO_TIMESTAMPING gets an integer bit field comprised of these values */
 enum SOF_TIMESTAMPING {
@@ -2980,7 +3029,7 @@ TEST(AsyncSocketTest, ErrMessageCallback) {
   ASSERT_EQ(
       errMsgCB.gotByteSeq_ + errMsgCB.gotTimestamp_, errMsgCB.resetAfter_);
 }
-#endif // MSG_ERRQUEUE
+#endif // FOLLY_HAVE_MSG_ERRQUEUE
 
 TEST(AsyncSocket, PreReceivedData) {
   TestServer server;
@@ -3264,5 +3313,74 @@ TEST(AsyncSocketTest, SendMessageAncillaryData) {
       magicString.begin(),
       magicString.end(),
       transferredMagicString.begin()));
+}
+
+TEST(AsyncSocketTest, UnixDomainSocketErrMessageCB) {
+  // In the latest stable kernel 4.14.3 as of 2017-12-04, Unix Domain
+  // Socket (UDS) does not support MSG_ERRQUEUE. So
+  // recvmsg(MSG_ERRQUEUE) will read application data from UDS which
+  // breaks application message flow.  To avoid this problem,
+  // AsyncSocket currently disables setErrMessageCB for UDS.
+  //
+  // This tests two things for UDS
+  // 1. setErrMessageCB fails
+  // 2. recvmsg(MSG_ERRQUEUE) reads application data
+  //
+  // Feel free to remove this test if UDS supports MSG_ERRQUEUE in the future.
+
+  int fd[2];
+  EXPECT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fd), 0);
+  ASSERT_NE(fd[0], -1);
+  ASSERT_NE(fd[1], -1);
+  SCOPE_EXIT {
+    close(fd[1]);
+  };
+
+  EXPECT_EQ(fcntl(fd[0], F_SETFL, O_NONBLOCK), 0);
+  EXPECT_EQ(fcntl(fd[1], F_SETFL, O_NONBLOCK), 0);
+
+  EventBase evb;
+  std::shared_ptr<AsyncSocket> socket = AsyncSocket::newSocket(&evb, fd[0]);
+
+  // setErrMessageCB should fail for unix domain socket
+  TestErrMessageCallback errMsgCB;
+  ASSERT_NE(&errMsgCB, nullptr);
+  socket->setErrMessageCB(&errMsgCB);
+  ASSERT_EQ(socket->getErrMessageCallback(), nullptr);
+
+#ifdef FOLLY_HAVE_MSG_ERRQUEUE
+  // The following verifies that MSG_ERRQUEUE does not work for UDS,
+  // and recvmsg reads application data
+  union {
+    // Space large enough to hold an 'int'
+    char control[CMSG_SPACE(sizeof(int))];
+    struct cmsghdr cmh;
+  } r_u;
+  struct msghdr msgh;
+  struct iovec iov;
+  int recv_data = 0;
+
+  msgh.msg_control = r_u.control;
+  msgh.msg_controllen = sizeof(r_u.control);
+  msgh.msg_name = nullptr;
+  msgh.msg_namelen = 0;
+  msgh.msg_iov = &iov;
+  msgh.msg_iovlen = 1;
+  iov.iov_base = &recv_data;
+  iov.iov_len = sizeof(recv_data);
+
+  // there is no data, recvmsg should fail
+  EXPECT_EQ(recvmsg(fd[1], &msgh, MSG_ERRQUEUE), -1);
+  EXPECT_TRUE(errno == EAGAIN || errno == EWOULDBLOCK);
+
+  // provide some application data, error queue should be empty if it exists
+  // However, UDS reads application data as error message
+  int test_data = 123456;
+  WriteCallback wcb;
+  socket->write(&wcb, &test_data, sizeof(test_data));
+  recv_data = 0;
+  ASSERT_NE(recvmsg(fd[1], &msgh, MSG_ERRQUEUE), -1);
+  ASSERT_EQ(recv_data, test_data);
+#endif // FOLLY_HAVE_MSG_ERRQUEUE
 }
 #endif

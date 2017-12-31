@@ -16,7 +16,7 @@
 #pragma once
 
 #include <folly/ThreadLocal.h>
-#include <folly/experimental/AsymmetricMemoryBarrier.h>
+#include <folly/synchronization/AsymmetricMemoryBarrier.h>
 
 namespace folly {
 
@@ -210,4 +210,4 @@ class TLRefCount {
   std::shared_ptr<void> collectGuard_;
 };
 
-}
+} // namespace folly

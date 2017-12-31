@@ -18,9 +18,9 @@
 
 #include <future>
 
-#include <folly/Baton.h>
 #include <folly/Executor.h>
 #include <folly/io/async/EventBase.h>
+#include <folly/synchronization/Baton.h>
 
 namespace folly {
 
@@ -118,16 +118,9 @@ class VirtualEventBase : public folly::Executor, public folly::TimeoutManager {
 
   /**
    * Returns you a handle which prevents VirtualEventBase from being destroyed.
-   * KeepAlive handle can be released from EventBase loop only.
    */
   KeepAlive getKeepAliveToken() override {
-    DCHECK(loopKeepAliveCount_ + loopKeepAliveCountAtomic_.load() > 0);
-
-    if (evb_.inRunningEventBaseThread()) {
-      ++loopKeepAliveCount_;
-    } else {
-      ++loopKeepAliveCountAtomic_;
-    }
+    keepAliveAcquire();
     return makeKeepAlive();
   }
 
@@ -136,8 +129,20 @@ class VirtualEventBase : public folly::Executor, public folly::TimeoutManager {
   }
 
  protected:
+  void keepAliveAcquire() override {
+    DCHECK(loopKeepAliveCount_ + loopKeepAliveCountAtomic_.load() > 0);
+
+    if (evb_.inRunningEventBaseThread()) {
+      ++loopKeepAliveCount_;
+    } else {
+      ++loopKeepAliveCountAtomic_;
+    }
+  }
+
   void keepAliveRelease() override {
-    getEventBase().dcheckIsInEventBaseThread();
+    if (!evb_.inRunningEventBaseThread()) {
+      return evb_.add([=] { keepAliveRelease(); });
+    }
     if (loopKeepAliveCountAtomic_.load()) {
       loopKeepAliveCount_ += loopKeepAliveCountAtomic_.exchange(0);
     }
@@ -174,4 +179,4 @@ class VirtualEventBase : public folly::Executor, public folly::TimeoutManager {
 
   folly::Synchronized<LoopCallbackList> onDestructionCallbacks_;
 };
-}
+} // namespace folly

@@ -45,9 +45,13 @@ spin_lock_test_SOURCES = SpinLockTest.cpp
 spin_lock_test_LDADD = libfollytestmain.la
 TESTS += spin_lock_test
 
-array_test_SOURCES = ArrayTest.cpp
+array_test_SOURCES = ../container/test/ArrayTest.cpp
 array_test_LDADD = libfollytestmain.la
 TESTS += array_test
+
+constexpr_math_test_SOURCES = ConstexprMathTest.cpp
+constexpr_math_test_LDADD = libfollytestmain.la
+TESTS += constexpr_math_test
 
 if RUN_ARCH_SPECIFIC_TESTS
 small_locks_test_SOURCES = SmallLocksTest.cpp
@@ -76,18 +80,27 @@ endif
 
 sorted_vector_types_test_SOURCES = sorted_vector_test.cpp
 sorted_vector_types_test_LDADD = libfollytestmain.la
+TESTS += sorted_vector_types_test
 
+container_access_test_SOURCES = ../container/test/AccessTest.cpp
+container_access_test_LDADD = libfollytestmain.la
+TESTS += container_access_test
 
-foreach_test_SOURCES = ForeachTest.cpp
+foreach_test_SOURCES = ../container/test/ForeachTest.cpp
 foreach_test_LDADD = libfollytestmain.la
+TESTS += foreach_test
 
-foreach_benchmark_SOURCES = ForeachBenchmark.cpp
+foreach_benchmark_SOURCES = ../container/test/ForeachBenchmark.cpp
 foreach_benchmark_LDADD = libfollytestmain.la $(top_builddir)/libfollybenchmark.la
 check_PROGRAMS += foreach_benchmark
 
-hash_test_SOURCES = HashTest.cpp
+hash_test_SOURCES = ../hash/test/HashTest.cpp
 hash_test_LDADD = libfollytestmain.la
+TESTS += hash_test
 
+invoke_test_SOURCES = ../functional/test/InvokeTest.cpp
+invoke_test_LDADD = libfollytestmain.la
+TESTS += invoke_test
 
 fbstring_test_using_jemalloc_SOURCES = FBStringTest.cpp
 fbstring_test_using_jemalloc_LDADD = libfollytestmain.la $(top_builddir)/libfollybenchmark.la
@@ -95,8 +108,9 @@ TESTS += fbstring_test_using_jemalloc
 
 thread_cached_int_test_SOURCES = ThreadCachedIntTest.cpp
 thread_cached_int_test_LDADD = libfollytestmain.la $(top_builddir)/libfollybenchmark.la
+TESTS += thread_cached_int_test
 
-thread_id_test_SOURCES = ThreadIdTest.cpp
+thread_id_test_SOURCES = ../system/test/ThreadIdTest.cpp
 thread_id_test_LDADD = libfollytestmain.la
 TESTS += thread_id_test
 
@@ -130,24 +144,31 @@ TESTS += scope_guard_test
 
 timeout_queue_test_SOURCES = TimeoutQueueTest.cpp
 timeout_queue_test_LDADD = libfollytestmain.la
+TESTS += timeout_queue_test
 
 conv_test_SOURCES = ConvTest.cpp
 conv_test_LDADD = libfollytestmain.la $(top_builddir)/libfollybenchmark.la
+TESTS += conv_test
 
 expected_test_SOURCES = ExpectedTest.cpp
 expected_test_LDADD = libfollytestmain.la $(top_builddir)/libfollybenchmark.la
+TESTS += expected_test
 
 range_test_SOURCES = RangeTest.cpp
 range_test_LDADD = libfollytestmain.la
+TESTS += range_test
 
 math_test_SOURCES = MathTest.cpp
 math_test_LDADD = libfollytestmain.la $(top_builddir)/libfollybenchmark.la
+TESTS += math_test
 
 bits_test_SOURCES = BitsTest.cpp
 bits_test_LDADD = libfollytestmain.la $(top_builddir)/libfollybenchmark.la
+TESTS += bits_test
 
 bit_iterator_test_SOURCES = BitIteratorTest.cpp
 bit_iterator_test_LDADD = libfollytestmain.la $(top_builddir)/libfollybenchmark.la
+TESTS += bit_iterator_test
 
 endian_test_SOURCES = EndianTest.cpp
 endian_test_LDADD = libfollytestmain.la
@@ -160,6 +181,10 @@ TESTS += rw_spinlock_test
 synchronized_test_SOURCES = SynchronizedTest.cpp
 synchronized_test_LDADD = libfollytestmain.la
 TESTS += synchronized_test
+
+synchronized_ptr_test_SOURCES = SynchronizedPtrTest.cpp
+synchronized_ptr_test_LDADD = libfollytestmain.la
+TESTS += synchronized_ptr_test
 
 lock_traits_test_SOURCES = LockTraitsTest.cpp
 lock_traits_test_LDADD = libfollytestmain.la
@@ -213,6 +238,12 @@ fingerprint_test_SOURCES = FingerprintTest.cpp
 fingerprint_test_LDADD = libfollytestmain.la $(top_builddir)/libfollybenchmark.la
 TESTS += fingerprint_test
 
+if HAVE_VARIABLE_TEMPLATES
+poly_test_SOURCES = PolyTest.cpp
+poly_test_LDADD = libfollytestmain.la
+TESTS += poly_test
+endif
+
 portability_test_SOURCES = PortabilityTest.cpp
 portability_test_LDADD = libfollytestmain.la
 TESTS += portability_test
@@ -229,7 +260,7 @@ token_bucket_test_SOURCES = TokenBucketTest.cpp
 token_bucket_test_LDADD = libfollytestmain.la  $(top_builddir)/libfollybenchmark.la
 TESTS += token_bucket_test
 
-thread_name_test_SOURCES = ThreadNameTest.cpp
+thread_name_test_SOURCES = ../system/test/ThreadNameTest.cpp
 thread_name_test_LDADD = libfollytestmain.la
 TESTS += thread_name_test
 
@@ -258,6 +289,10 @@ try_test_SOURCES = TryTest.cpp
 try_test_LDADD = libfollytestmain.la
 TESTS += try_test
 
+typelist_test_SOURCES = TypeListTest.cpp
+typelist_test_LDADD = libfollytestmain.la
+TESTS += typelist_test
+
 uncaught_exceptions_test_SOURCES = UncaughtExceptionsTest.cpp
 uncaught_exceptions_test_LDADD = libfollytestmain.la
 TESTS += uncaught_exceptions_test
@@ -273,7 +308,6 @@ futures_test_SOURCES = \
     ../futures/test/ConversionOperatorTest.cpp \
     ../futures/test/CoreTest.cpp \
     ../futures/test/EnsureTest.cpp \
-    ../futures/test/ExecutorTest.cpp \
     ../futures/test/FSMTest.cpp \
     ../futures/test/FilterTest.cpp \
     ../futures/test/FutureTest.cpp \
@@ -309,25 +343,25 @@ function_test_SOURCES = \
 function_test_LDADD = libfollytestmain.la
 TESTS += function_test
 
-functional_test_SOURCES = \
-		FunctionalTest.cpp
-functional_test_LDADD = libfollytestmain.la
-TESTS += functional_test
+rvalue_reference_wrapper_test_SOURCES = \
+		../lang/test/RValueReferenceWrapperTest.cpp
+rvalue_reference_wrapper_test_LDADD = libfollytestmain.la
+TESTS += rvalue_reference_wrapper_test
 
 ssl_test_SOURCES = \
 		../ssl/test/OpenSSLHashTest.cpp
 ssl_test_LDADD = libfollytestmain.la -lcrypto
 TESTS += ssl_test
 
-mallctl_helper_test_SOURCES = MallctlHelperTest.cpp
+mallctl_helper_test_SOURCES = ../memory/test/MallctlHelperTest.cpp
 mallctl_helper_test_LDADD = libfollytestmain.la
 TESTS += mallctl_helper_test
 
-apply_tuple_test_SOURCES = ApplyTupleTest.cpp
+apply_tuple_test_SOURCES = ../functional/test/ApplyTupleTest.cpp
 apply_tuple_test_LDADD = libfollytestmain.la
 TESTS += apply_tuple_test
 
-partial_test_SOURCES = PartialTest.cpp
+partial_test_SOURCES = ../functional/test/PartialTest.cpp
 partial_test_LDADD = libfollytestmain.la
 TESTS += partial_test
 
@@ -339,7 +373,7 @@ utility_test_SOURCES = UtilityTest.cpp
 utility_test_LDADD = libfollytestmain.la
 TESTS += utility_test
 
-iterator_test_SOURCES = IteratorTest.cpp
+iterator_test_SOURCES = ../container/test/IteratorTest.cpp
 iterator_test_LDADD = libfollytestmain.la
 TESTS += iterator_test
 

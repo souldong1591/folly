@@ -29,6 +29,7 @@
 #include <climits>
 #include <condition_variable>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <thread>
@@ -36,12 +37,12 @@
 
 #include <glog/logging.h>
 
-#include <folly/Baton.h>
 #include <folly/Memory.h>
-#include <folly/ThreadId.h>
 #include <folly/experimental/io/FsUtil.h>
 #include <folly/portability/GTest.h>
 #include <folly/portability/Unistd.h>
+#include <folly/synchronization/Baton.h>
+#include <folly/system/ThreadId.h>
 
 using namespace folly;
 
@@ -269,7 +270,7 @@ TEST(ThreadLocal, InterleavedDestructors) {
     {
       std::lock_guard<std::mutex> g(lock);
       thIterPrev = thIter;
-      w.reset(new ThreadLocal<Widget>());
+      w = std::make_unique<ThreadLocal<Widget>>();
       ++wVersion;
     }
     while (true) {
@@ -632,7 +633,8 @@ struct PthreadKeyUnregisterTester {
   PthreadKeyUnregister p;
   constexpr PthreadKeyUnregisterTester() = default;
 };
-}}
+} // namespace threadlocal_detail
+} // namespace folly
 
 TEST(ThreadLocal, UnregisterClassHasConstExprCtor) {
   folly::threadlocal_detail::PthreadKeyUnregisterTester x;

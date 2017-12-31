@@ -54,9 +54,9 @@
 #include <string>
 #include <utility>
 
-#include <folly/Hash.h>
-#include <folly/Malloc.h>
 #include <folly/Traits.h>
+#include <folly/hash/Hash.h>
+#include <folly/memory/Malloc.h>
 #include <folly/portability/BitsFunctexcept.h>
 
 // When used in folly, assertions are not disabled.
@@ -1420,7 +1420,9 @@ class basic_fbstring {
   }
 
   basic_fbstring& assign(const basic_fbstring& str) {
-    if (&str == this) return *this;
+    if (&str == this) {
+      return *this;
+    }
     return assign(str.data(), str.size());
   }
 
@@ -2331,7 +2333,7 @@ basic_fbstring<E, T, A, S>::find_first_of(
   }
   const_iterator i(begin() + pos), finish(end());
   for (; i != finish; ++i) {
-    if (traits_type::find(s, n, *i) != 0) {
+    if (traits_type::find(s, n, *i) != nullptr) {
       return i - begin();
     }
   }
@@ -2346,7 +2348,7 @@ basic_fbstring<E, T, A, S>::find_last_of(
     pos = std::min(pos, length() - 1);
     const_iterator i(begin() + pos);
     for (;; --i) {
-      if (traits_type::find(s, n, *i) != 0) {
+      if (traits_type::find(s, n, *i) != nullptr) {
         return i - begin();
       }
       if (i == begin()) {
@@ -2364,7 +2366,7 @@ basic_fbstring<E, T, A, S>::find_first_not_of(
   if (pos < length()) {
     const_iterator i(begin() + pos), finish(end());
     for (; i != finish; ++i) {
-      if (traits_type::find(s, n, *i) == 0) {
+      if (traits_type::find(s, n, *i) == nullptr) {
         return i - begin();
       }
     }
@@ -2380,7 +2382,7 @@ basic_fbstring<E, T, A, S>::find_last_not_of(
     pos = std::min(pos, size() - 1);
     const_iterator i(begin() + pos);
     for (;; --i) {
-      if (traits_type::find(s, n, *i) == 0) {
+      if (traits_type::find(s, n, *i) == nullptr) {
         return i - begin();
       }
       if (i == begin()) {
@@ -2894,3 +2896,13 @@ FOLLY_POP_WARNING
 #undef FBSTRING_LIKELY
 #undef FBSTRING_UNLIKELY
 #undef FBSTRING_ASSERT
+
+#ifndef _LIBSTDCXX_FBSTRING
+namespace folly {
+template <class T>
+struct IsSomeString;
+
+template <>
+struct IsSomeString<fbstring> : std::true_type {};
+} // namespace folly
+#endif

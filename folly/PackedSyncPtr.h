@@ -23,7 +23,7 @@
 #include <folly/Portability.h>
 #include <folly/SmallLocks.h>
 
-#if !FOLLY_X64 && !FOLLY_PPC64 && !FOLLY_A64
+#if !FOLLY_X64 && !FOLLY_PPC64 && !FOLLY_AARCH64
 #error "PackedSyncPtr is x64, ppc64 or aarch64 specific code."
 #endif
 
@@ -74,7 +74,7 @@ class PackedSyncPtr {
    * (We are avoiding a constructor to ensure gcc allows us to put
    * this class in packed structures.)
    */
-  void init(T* initialPtr = 0, uint16_t initialExtra = 0) {
+  void init(T* initialPtr = nullptr, uint16_t initialExtra = 0) {
     auto intPtr = reinterpret_cast<uintptr_t>(initialPtr);
     CHECK(!(intPtr >> 48));
     data_.init(intPtr);
@@ -150,4 +150,4 @@ std::ostream& operator<<(std::ostream& os, const PackedSyncPtr<T>& ptr) {
   os << "PackedSyncPtr(" << ptr.get() << ", " << ptr.extra() << ")";
   return os;
 }
-}
+} // namespace folly

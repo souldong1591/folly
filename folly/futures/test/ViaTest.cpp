@@ -16,13 +16,13 @@
 
 #include <thread>
 
-#include <folly/Baton.h>
 #include <folly/MPMCQueue.h>
-#include <folly/futures/DrivableExecutor.h>
+#include <folly/executors/DrivableExecutor.h>
+#include <folly/executors/InlineExecutor.h>
+#include <folly/executors/ManualExecutor.h>
 #include <folly/futures/Future.h>
-#include <folly/futures/InlineExecutor.h>
-#include <folly/futures/ManualExecutor.h>
 #include <folly/portability/GTest.h>
+#include <folly/synchronization/Baton.h>
 
 using namespace folly;
 
@@ -50,8 +50,9 @@ struct ViaFixture : public testing::Test {
   {
     t = std::thread([=] {
         ManualWaiter eastWaiter(eastExecutor);
-        while (!done)
+        while (!done) {
           eastWaiter.drive();
+        }
       });
   }
 
@@ -466,7 +467,9 @@ TEST(Via, viaRaces) {
     p.setValue();
   });
 
-  while (!done) x.run();
+  while (!done) {
+    x.run();
+  }
   t1.join();
   t2.join();
 }

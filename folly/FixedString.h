@@ -28,6 +28,7 @@
 #include <type_traits>
 #include <utility>
 
+#include <folly/ConstexprMath.h>
 #include <folly/Portability.h>
 #include <folly/Range.h>
 #include <folly/Utility.h>
@@ -314,18 +315,6 @@ FOLLY_CPP14_CONSTEXPR void constexpr_swap(T& a, T& b) noexcept(
   b = std::move(tmp);
 }
 
-// FUTURE: use const_log2 to fold instantiations of BasicFixedString together.
-// All BasicFixedString<C, N> instantiations could share the implementation
-// of BasicFixedString<C, M>, where M is the next highest power of 2 after N.
-//
-// Also, because of alignment of the data_ and size_ members, N should never be
-// smaller than `(alignof(std::size_t)/sizeof(C))-1` (-1 because of the null
-// terminator). OR, create a specialization for BasicFixedString<C, 0u> that
-// does not have a size_ member, since it is unnecessary.
-constexpr std::size_t const_log2(std::size_t N, std::size_t log2 = 0u) {
-  return N / 2u == 0u ? log2 : const_log2(N / 2u, log2 + 1u);
-}
-
 // For constexpr reverse iteration over a BasicFixedString
 template <class T>
 struct ReverseIterator {
@@ -420,7 +409,7 @@ struct ReverseIterator {
 } // namespace fixedstring
 } // namespace detail
 
-// Defined in folly/Hash.h
+// Defined in folly/hash/Hash.h
 std::uint32_t hsieh_hash32_buf(const void* buf, std::size_t len);
 
 /** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** *
@@ -528,6 +517,15 @@ class BasicFixedString : private detail::fixedstring::FixedStringBase {
   friend class BasicFixedString;
   friend struct detail::fixedstring::Helper;
 
+  // FUTURE: use constexpr_log2 to fold instantiations of BasicFixedString
+  // together. All BasicFixedString<C, N> instantiations could share the
+  // implementation of BasicFixedString<C, M>, where M is the next highest power
+  // of 2 after N.
+  //
+  // Also, because of alignment of the data_ and size_ members, N should never
+  // be smaller than `(alignof(std::size_t)/sizeof(C))-1` (-1 because of the
+  // null terminator). OR, create a specialization for BasicFixedString<C, 0u>
+  // that does not have a size_ member, since it is unnecessary.
   Char data_[N + 1u]; // +1 for the null terminator
   std::size_t size_; // Nbr of chars, not incl. null terminator. size_ <= N.
 
@@ -790,29 +788,6 @@ class BasicFixedString : private detail::fixedstring::FixedStringBase {
     size_ = il.size();
     data_[size_] = Char(0);
     return *this;
-  }
-
-  /** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** **
-   * Conversion to folly::Range
-   * \return `Range<Iter>{begin(), end()}`
-   */
-  template <
-      class Iter,
-      class = typename std::enable_if<
-          std::is_convertible<Char*, Iter>::value>::type>
-  FOLLY_CPP14_CONSTEXPR /* implicit */ operator Range<Iter>() noexcept {
-    return {begin(), end()};
-  }
-
-  /**
-   * \overload
-   */
-  template <
-      class Iter,
-      class = typename std::enable_if<
-          std::is_convertible<const Char*, Iter>::value>::type>
-  constexpr /* implicit */ operator Range<Iter>() const noexcept {
-    return {begin(), end()};
   }
 
   /** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** **
@@ -1267,8 +1242,9 @@ class BasicFixedString : private detail::fixedstring::FixedStringBase {
       std::size_t count,
       Char ch) noexcept(false) {
     detail::fixedstring::checkOverflow(count, N - size_);
-    for (std::size_t i = 0u; i < count; ++i)
+    for (std::size_t i = 0u; i < count; ++i) {
       data_[size_ + i] = ch;
+    }
     size_ += count;
     data_[size_] = Char(0);
     return *this;
@@ -1315,8 +1291,9 @@ class BasicFixedString : private detail::fixedstring::FixedStringBase {
     detail::fixedstring::checkOverflow(pos, that.size_);
     count = detail::fixedstring::checkOverflowOrNpos(count, that.size_ - pos);
     detail::fixedstring::checkOverflow(count, N - size_);
-    for (std::size_t i = 0u; i < count; ++i)
+    for (std::size_t i = 0u; i < count; ++i) {
       data_[size_ + i] = that.data_[pos + i];
+    }
     size_ += count;
     data_[size_] = Char(0);
     return *this;
@@ -1343,8 +1320,9 @@ class BasicFixedString : private detail::fixedstring::FixedStringBase {
       const Char* that,
       std::size_t count) noexcept(false) {
     detail::fixedstring::checkOverflow(count, N - size_);
-    for (std::size_t i = 0u; i < count; ++i)
+    for (std::size_t i = 0u; i < count; ++i) {
       data_[size_ + i] = that[i];
+    }
     size_ += count;
     data_[size_] = Char(0);
     return *this;
@@ -2052,8 +2030,9 @@ class BasicFixedString : private detail::fixedstring::FixedStringBase {
   copy(Char* dest, std::size_t count, std::size_t pos) const noexcept(false) {
     detail::fixedstring::checkOverflow(pos, size_);
     for (std::size_t i = 0u; i < count; ++i) {
-      if (i + pos == size_)
+      if (i + pos == size_) {
         return size_;
+      }
       dest[i] = data_[i + pos];
     }
     return count;
@@ -3031,7 +3010,7 @@ inline namespace {
 // "const std::size_t&" is so that folly::npos has the same address in every
 // translation unit. This is to avoid potential violations of the ODR.
 constexpr const std::size_t& npos = detail::fixedstring::FixedStringBase::npos;
-}
+} // namespace
 
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
@@ -3084,8 +3063,8 @@ FOLLY_DEFINE_FIXED_STRING_UDL(64)
 FOLLY_DEFINE_FIXED_STRING_UDL(128)
 
 #undef FOLLY_DEFINE_FIXED_STRING_UDL
-}
-}
+} // namespace string_literals
+} // namespace literals
 
 // TODO:
 // // numeric conversions:
@@ -3120,4 +3099,4 @@ FOLLY_DEFINE_FIXED_STRING_UDL(128)
 // constexpr FixedString</*...*/> to_fixed_string_ll() noexcept
 // template <unsigned long long val>
 // constexpr FixedString</*...*/> to_fixed_string_ull() noexcept;
-}
+} // namespace folly

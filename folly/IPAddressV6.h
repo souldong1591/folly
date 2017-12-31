@@ -24,10 +24,13 @@
 #include <map>
 #include <stdexcept>
 
-#include <folly/Hash.h>
+#include <folly/Expected.h>
+#include <folly/FBString.h>
+#include <folly/IPAddressException.h>
 #include <folly/Optional.h>
 #include <folly/Range.h>
 #include <folly/detail/IPAddress.h>
+#include <folly/hash/Hash.h>
 
 namespace folly {
 
@@ -91,17 +94,27 @@ class IPAddressV6 {
       8 /*words*/ * 4 /*hex chars per word*/ + 7 /*separators*/;
 
   // returns true iff the input string can be parsed as an ipv6-address
-  static bool validate(StringPiece ip);
+  static bool validate(StringPiece ip) noexcept;
 
   /**
    * Create a new IPAddress instance from the provided binary data.
    * @throws IPAddressFormatException if the input length is not 16 bytes.
    */
-  static IPAddressV6 fromBinary(ByteRange bytes) {
-    IPAddressV6 addr;
-    addr.setFromBinary(bytes);
-    return addr;
-  }
+  static IPAddressV6 fromBinary(ByteRange bytes);
+
+  /**
+   * Non-throwing version of fromBinary().
+   * On failure returns IPAddressFormatError.
+   */
+  static Expected<IPAddressV6, IPAddressFormatError> tryFromBinary(
+      ByteRange bytes) noexcept;
+
+  /**
+   * Tries to create a new IPAddressV6 instance from provided string and
+   * returns it on success. Returns IPAddressFormatError on failure.
+   */
+  static Expected<IPAddressV6, IPAddressFormatError> tryFromString(
+      StringPiece str) noexcept;
 
   /**
    * Create a new IPAddress instance from the ip6.arpa representation.
@@ -130,13 +143,13 @@ class IPAddressV6 {
   explicit IPAddressV6(StringPiece ip);
 
   // ByteArray16 constructor
-  explicit IPAddressV6(const ByteArray16& src);
+  explicit IPAddressV6(const ByteArray16& src) noexcept;
 
   // in6_addr constructor
-  explicit IPAddressV6(const in6_addr& src);
+  explicit IPAddressV6(const in6_addr& src) noexcept;
 
   // sockaddr_in6 constructor
-  explicit IPAddressV6(const sockaddr_in6& src);
+  explicit IPAddressV6(const sockaddr_in6& src) noexcept;
 
   /**
    * Create a link-local IPAddressV6 from the specified ethernet MAC address.
@@ -230,6 +243,16 @@ class IPAddressV6 {
    * You can use Optional::value() to check whether the mac address is not null.
    */
   Optional<MacAddress> getMacAddressFromLinkLocal() const;
+
+  /**
+   * Return the mac address if this is an auto-configured IPv6 address based on
+   * EUI-64
+   *
+   * @return an Optional<MacAddress> union representing the mac address.
+   * If the address is not based on EUI-64 it will return an empty Optional.
+   * You can use Optional::value() to check whether the mac address is not null.
+   */
+  Optional<MacAddress> getMacAddressFromEUI64() const;
 
   /**
    * Return true if this is a multicast address.
@@ -395,9 +418,10 @@ class IPAddressV6 {
 
   /**
    * Set the current IPAddressV6 object to have the address specified by bytes.
-   * @throws IPAddressFormatException if bytes.size() is not 16.
+   * Returns IPAddressFormatError if bytes.size() is not 16.
    */
-  void setFromBinary(ByteRange bytes);
+  Expected<Unit, IPAddressFormatError> trySetFromBinary(
+      ByteRange bytes) noexcept;
 };
 
 // boost::hash uses hash_value() so this allows boost::hash to work

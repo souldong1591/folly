@@ -36,7 +36,19 @@ class A {
  private:
   int x_;
 };
-}
+
+class MoveConstructOnly {
+ public:
+  MoveConstructOnly() = default;
+  MoveConstructOnly(const MoveConstructOnly&) = delete;
+  MoveConstructOnly(MoveConstructOnly&&) = default;
+};
+
+class MutableContainer {
+ public:
+  mutable MoveConstructOnly val;
+};
+} // namespace
 
 TEST(Try, basic) {
   A a(5);
@@ -57,6 +69,64 @@ TEST(Try, in_place_nested) {
   Try<Try<A>> t_t_a(in_place, in_place, 5);
 
   EXPECT_EQ(5, t_t_a.value().value().x());
+}
+
+TEST(Try, MoveDereference) {
+  auto ptr = std::make_unique<int>(1);
+  auto t = Try<std::unique_ptr<int>>{std::move(ptr)};
+  auto result = *std::move(t);
+  EXPECT_EQ(*result, 1);
+}
+
+TEST(Try, MoveConstRvalue) {
+  // tests to see if Try returns a const Rvalue, this is required in the case
+  // where for example MutableContainer has a mutable memebr that is move only
+  // and you want to fetch the value from the Try and move it into a member
+  {
+    const Try<MutableContainer> t{in_place};
+    auto val = MoveConstructOnly{std::move(t).value().val};
+    static_cast<void>(val);
+  }
+  {
+    const Try<MutableContainer> t{in_place};
+    auto val = (*(std::move(t))).val;
+    static_cast<void>(val);
+  }
+}
+
+TEST(Try, ValueOverloads) {
+  using ML = int&;
+  using MR = int&&;
+  using CL = const int&;
+  using CR = const int&&;
+
+  {
+    auto obj = Try<int>{};
+    using ActualML = decltype(obj.value());
+    using ActualMR = decltype(std::move(obj).value());
+    using ActualCL = decltype(as_const(obj).value());
+    using ActualCR = decltype(std::move(as_const(obj)).value());
+    EXPECT_TRUE((std::is_same<ML, ActualML>::value));
+    EXPECT_TRUE((std::is_same<MR, ActualMR>::value));
+    EXPECT_TRUE((std::is_same<CL, ActualCL>::value));
+    EXPECT_TRUE((std::is_same<CR, ActualCR>::value));
+  }
+
+  {
+    auto obj = Try<int>{3};
+    EXPECT_EQ(obj.value(), 3);
+    EXPECT_EQ(std::move(obj).value(), 3);
+    EXPECT_EQ(as_const(obj).value(), 3);
+    EXPECT_EQ(std::move(as_const(obj)).value(), 3);
+  }
+
+  {
+    auto obj = Try<int>{make_exception_wrapper<std::range_error>("oops")};
+    EXPECT_THROW(obj.value(), std::range_error);
+    EXPECT_THROW(std::move(obj.value()), std::range_error);
+    EXPECT_THROW(as_const(obj.value()), std::range_error);
+    EXPECT_THROW(std::move(as_const(obj.value())), std::range_error);
+  }
 }
 
 // Make sure we can copy Trys for copyable types
@@ -107,6 +177,69 @@ TEST(Try, makeTryWithVoidThrow) {
 
   auto result = makeTryWith(func);
   EXPECT_TRUE(result.hasException<std::runtime_error>());
+}
+
+TEST(Try, exception) {
+  using ML = exception_wrapper&;
+  using MR = exception_wrapper&&;
+  using CL = exception_wrapper const&;
+  using CR = exception_wrapper const&&;
+
+  {
+    auto obj = Try<int>();
+    using ActualML = decltype(obj.exception());
+    using ActualMR = decltype(std::move(obj).exception());
+    using ActualCL = decltype(as_const(obj).exception());
+    using ActualCR = decltype(std::move(as_const(obj)).exception());
+    EXPECT_TRUE((std::is_same<ML, ActualML>::value));
+    EXPECT_TRUE((std::is_same<MR, ActualMR>::value));
+    EXPECT_TRUE((std::is_same<CL, ActualCL>::value));
+    EXPECT_TRUE((std::is_same<CR, ActualCR>::value));
+  }
+
+  {
+    auto obj = Try<int>(3);
+    EXPECT_THROW(obj.exception(), TryException);
+    EXPECT_THROW(std::move(obj).exception(), TryException);
+    EXPECT_THROW(as_const(obj).exception(), TryException);
+    EXPECT_THROW(std::move(as_const(obj)).exception(), TryException);
+  }
+
+  {
+    auto obj = Try<int>(make_exception_wrapper<int>(-3));
+    EXPECT_EQ(-3, *obj.exception().get_exception<int>());
+    EXPECT_EQ(-3, *std::move(obj).exception().get_exception<int>());
+    EXPECT_EQ(-3, *as_const(obj).exception().get_exception<int>());
+    EXPECT_EQ(-3, *std::move(as_const(obj)).exception().get_exception<int>());
+  }
+
+  {
+    auto obj = Try<void>();
+    using ActualML = decltype(obj.exception());
+    using ActualMR = decltype(std::move(obj).exception());
+    using ActualCL = decltype(as_const(obj).exception());
+    using ActualCR = decltype(std::move(as_const(obj)).exception());
+    EXPECT_TRUE((std::is_same<ML, ActualML>::value));
+    EXPECT_TRUE((std::is_same<MR, ActualMR>::value));
+    EXPECT_TRUE((std::is_same<CL, ActualCL>::value));
+    EXPECT_TRUE((std::is_same<CR, ActualCR>::value));
+  }
+
+  {
+    auto obj = Try<void>();
+    EXPECT_THROW(obj.exception(), TryException);
+    EXPECT_THROW(std::move(obj).exception(), TryException);
+    EXPECT_THROW(as_const(obj).exception(), TryException);
+    EXPECT_THROW(std::move(as_const(obj)).exception(), TryException);
+  }
+
+  {
+    auto obj = Try<void>(make_exception_wrapper<int>(-3));
+    EXPECT_EQ(-3, *obj.exception().get_exception<int>());
+    EXPECT_EQ(-3, *std::move(obj).exception().get_exception<int>());
+    EXPECT_EQ(-3, *as_const(obj).exception().get_exception<int>());
+    EXPECT_EQ(-3, *std::move(as_const(obj)).exception().get_exception<int>());
+  }
 }
 
 template <typename E>
@@ -278,4 +411,25 @@ TEST(Try, withException) {
     EXPECT_TRUE(t.withException([](std::runtime_error const&) {}));
     EXPECT_FALSE(t.withException([](std::logic_error const&) {}));
   }
+}
+
+TEST(Try, TestUnwrapTuple) {
+  auto original = std::make_tuple(Try<int>{1}, Try<int>{2});
+  EXPECT_EQ(std::make_tuple(1, 2), unwrapTryTuple(original));
+  EXPECT_EQ(std::make_tuple(1, 2), unwrapTryTuple(folly::copy(original)));
+  EXPECT_EQ(std::make_tuple(1, 2), unwrapTryTuple(folly::as_const(original)));
+}
+
+TEST(Try, TestUnwrapPair) {
+  auto original = std::make_pair(Try<int>{1}, Try<int>{2});
+  EXPECT_EQ(std::make_pair(1, 2), unwrapTryTuple(original));
+  EXPECT_EQ(std::make_pair(1, 2), unwrapTryTuple(folly::copy(original)));
+  EXPECT_EQ(std::make_pair(1, 2), unwrapTryTuple(folly::as_const(original)));
+}
+
+TEST(Try, TestUnwrapForward) {
+  using UPtr_t = std::unique_ptr<int>;
+  auto original = std::make_tuple(Try<UPtr_t>{std::make_unique<int>(1)});
+  auto unwrapped = unwrapTryTuple(std::move(original));
+  EXPECT_EQ(*std::get<0>(unwrapped), 1);
 }

@@ -93,7 +93,7 @@ struct MyObjectDirectory {
   std::shared_ptr<MyMap> prev_;
 };
 
-}
+} // namespace
 
 //////////////////////////////////////////////////////////////////////
 
@@ -119,5 +119,7 @@ TEST(AHMIntStressTest, Test) {
     });
   }
 
-  for (auto& t : threads) t.join();
+  for (auto& t : threads) {
+    t.join();
+}
 }

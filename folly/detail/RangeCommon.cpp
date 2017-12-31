@@ -18,7 +18,7 @@
 
 #include <bitset>
 
-#include <folly/SparseByteSet.h>
+#include <folly/container/SparseByteSet.h>
 
 namespace folly {
 
@@ -53,5 +53,5 @@ size_t qfind_first_byte_of_byteset(
   }
   return std::string::npos;
 }
-}
-}
+} // namespace detail
+} // namespace folly

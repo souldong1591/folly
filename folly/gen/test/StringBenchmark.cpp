@@ -19,8 +19,8 @@
 #include <glog/logging.h>
 
 #include <folly/Benchmark.h>
-#include <folly/Foreach.h>
 #include <folly/String.h>
+#include <folly/container/Foreach.h>
 #include <folly/gen/Base.h>
 #include <folly/gen/String.h>
 
@@ -173,7 +173,6 @@ BENCHMARK_RELATIVE(StringUnsplit_Old_ReusedBuffer, iters) {
 
 BENCHMARK_RELATIVE(StringUnsplit_Gen, iters) {
   size_t s = 0;
-  StringPiece line(kLine);
   while (iters--) {
     fbstring joined = from(testStrVector) | unsplit(',');
     s += joined.size();

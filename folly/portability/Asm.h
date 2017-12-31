@@ -36,10 +36,10 @@ inline void asm_volatile_pause() {
   ::_mm_pause();
 #elif defined(__i386__) || FOLLY_X64
   asm volatile("pause");
-#elif FOLLY_A64 || defined(__arm__)
+#elif FOLLY_AARCH64 || defined(__arm__)
   asm volatile("yield");
 #elif FOLLY_PPC64
   asm volatile("or 27,27,27");
 #endif
 }
-}
+} // namespace folly

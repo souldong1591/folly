@@ -13,8 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+#include <folly/portability/Config.h>
+
+#ifdef FOLLY_USE_SYMBOLIZER
 #include <folly/Singleton.h>
-#include <folly/experimental/symbolizer/Symbolizer.h>
+#include <folly/experimental/symbolizer/Symbolizer.h> // @manual
 
 namespace folly {
 
@@ -52,6 +56,6 @@ SetStackTraceGetter setStackTraceGetter;
 #else
 SetStackTraceGetter __attribute__((__init_priority__(101))) setStackTraceGetter;
 #endif
-}
-
-}
+} // namespace
+} // namespace folly
+#endif

@@ -29,6 +29,7 @@
 #include <folly/futures/Future.h>
 #include <folly/futures/Promise.h>
 #include <folly/init/Init.h>
+#include <folly/lang/SafeAssert.h>
 #include <folly/portability/GFlags.h>
 #include <folly/portability/GMock.h>
 #include <folly/portability/GTest.h>
@@ -115,7 +116,7 @@ void handleLoggingError(
     std::string&& msg) {
   internalWarnings->emplace_back(std::move(msg));
 }
-}
+} // namespace
 
 TEST(AsyncFileWriter, ioError) {
   // Set the LoggerDB internal warning handler so we can record the messages
@@ -205,7 +206,7 @@ size_t fillUpPipe(int fd) {
 
   return totalBytes;
 }
-}
+} // namespace
 
 TEST(AsyncFileWriter, flush) {
   // Set up a pipe(), then write data to the write endpoint until it fills up
@@ -294,7 +295,9 @@ class ReadStats {
   }
   void writerFinished(size_t threadID, size_t messagesWritten, uint32_t flags) {
     auto map = perThreadWriteData_.wlock();
-    assert(map->find(threadID) == map->end());
+    FOLLY_SAFE_CHECK(
+        map->find(threadID) == map->end(),
+        "multiple writer threads with same ID");
     auto& data = (*map)[threadID];
     data.numMessagesWritten = messagesWritten;
     data.flags = flags;
@@ -612,8 +615,7 @@ TEST(AsyncFileWriter, discard) {
 int main(int argc, char* argv[]) {
   testing::InitGoogleTest(&argc, argv);
   folly::init(&argc, &argv);
-  // Don't use async logging in the async logging tests :-)
-  folly::initLoggingGlogStyle(FLAGS_logging, LogLevel::INFO, /* async */ false);
+  folly::initLogging(FLAGS_logging);
 
   return RUN_ALL_TESTS();
 }

@@ -111,7 +111,7 @@ processing sequences of values efficiently in C++ akin to C#'s LINQ.
 encoding](http://www.ir.uwaterloo.ca/book/addenda-06-index-compression.html)
 for 32-bit values.
 
-####`IpAddress.h`
+#### `IpAddress.h`
 
 A collection of utilities to deal with IPAddresses, including ipv4 and ipv6.
 
@@ -162,6 +162,11 @@ chain several queues together with processing steps in between.
 
 A highly specialized data structure consisting of a pointer, a 1-bit
 spin lock, and a 15-bit integral, all inside one 64-bit word.
+
+#### [`Poly.h`](Poly.md)
+
+A class template that makes it relatively easy to define a type-erasing
+polymorphic object wrapper.
 
 #### `Preprocessor.h`
 

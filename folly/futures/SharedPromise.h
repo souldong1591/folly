@@ -17,6 +17,7 @@
 #pragma once
 
 #include <folly/Portability.h>
+#include <folly/executors/InlineExecutor.h>
 #include <folly/futures/Promise.h>
 
 namespace folly {
@@ -49,6 +50,15 @@ class SharedPromise {
   /**
    * Return a Future tied to the shared core state. Unlike Promise::getFuture,
    * this can be called an unlimited number of times per SharedPromise.
+   */
+  SemiFuture<T> getSemiFuture();
+
+  /**
+   * Return a Future tied to the shared core state. Unlike Promise::getFuture,
+   * this can be called an unlimited number of times per SharedPromise.
+   * NOTE: This function is deprecated. Please use getSemiFuture and pass the
+   *       appropriate executor to .via on the returned SemiFuture to get a
+   *       valid Future where necessary.
    */
   Future<T> getFuture();
 
@@ -116,7 +126,7 @@ class SharedPromise {
   std::function<void(exception_wrapper const&)> interruptHandler_;
 };
 
-}
+} // namespace folly
 
 #include <folly/futures/Future.h>
 #include <folly/futures/SharedPromise-inl.h>

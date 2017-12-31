@@ -262,8 +262,9 @@ TEST(Singleton, SharedPtrUsage) {
     auto start_time = std::chrono::steady_clock::now();
     vault.destroyInstances();
     auto duration = std::chrono::steady_clock::now() - start_time;
-    EXPECT_TRUE(duration > std::chrono::seconds{4} &&
-                duration < std::chrono::seconds{6});
+    EXPECT_TRUE(
+        duration > std::chrono::seconds{4} &&
+        duration < std::chrono::seconds{folly::kIsSanitizeAddress ? 30 : 6});
   }
   EXPECT_EQ(vault.registeredSingletonCount(), 4);
   EXPECT_EQ(vault.livingSingletonCount(), 0);
@@ -447,7 +448,7 @@ TEST(Singleton, SingletonConcurrencyStress) {
 
 namespace {
 struct EagerInitSyncTag {};
-}
+} // namespace
 template <typename T, typename Tag = detail::DefaultTag>
 using SingletonEagerInitSync = Singleton<T, Tag, EagerInitSyncTag>;
 TEST(Singleton, SingletonEagerInitSync) {
@@ -465,7 +466,7 @@ TEST(Singleton, SingletonEagerInitSync) {
 
 namespace {
 struct EagerInitAsyncTag {};
-}
+} // namespace
 template <typename T, typename Tag = detail::DefaultTag>
 using SingletonEagerInitAsync = Singleton<T, Tag, EagerInitAsyncTag>;
 TEST(Singleton, SingletonEagerInitAsync) {
@@ -522,7 +523,7 @@ class TestEagerInitParallelExecutor : public folly::Executor {
 
 namespace {
 struct EagerInitParallelTag {};
-}
+} // namespace
 template <typename T, typename Tag = detail::DefaultTag>
 using SingletonEagerInitParallel = Singleton<T, Tag, EagerInitParallelTag>;
 TEST(Singleton, SingletonEagerInitParallel) {

@@ -18,15 +18,16 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <memory>
 #include <thread>
 
 #include <glog/logging.h>
 
 #include <folly/Benchmark.h>
-#include <folly/Hash.h>
-#include <folly/ThreadId.h>
+#include <folly/hash/Hash.h>
 #include <folly/portability/GFlags.h>
 #include <folly/portability/GTest.h>
+#include <folly/system/ThreadId.h>
 
 using namespace folly;
 
@@ -70,7 +71,7 @@ void Runner(Counter* counter, uint32_t iterations) {
     }
   }
 }
-}
+} // namespace
 
 // Slow test with fewer threads where there are more busy waits and
 // many calls to readFull().  This attempts to test as many of the
@@ -86,7 +87,8 @@ TEST_F(ThreadCachedIntTest, MultithreadedSlow) {
   // iteration, threads[1] performs 2 iterations, threads[2] performs
   // 3 iterations, and so on.
   for (uint32_t i = 0; i < kNumThreads; ++i) {
-    threads[i].reset(new std::thread(Runner, &g_counter_for_mt_slow, i + 1));
+    threads[i] =
+        std::make_unique<std::thread>(Runner, &g_counter_for_mt_slow, i + 1);
   }
   // Variable to grab current counter value.
   int32_t counter_value;
@@ -141,7 +143,8 @@ TEST_F(ThreadCachedIntTest, MultithreadedFast) {
   // iteration, threads[1] performs 2 iterations, threads[2] performs
   // 3 iterations, and so on.
   for (uint32_t i = 0; i < kNumThreads; ++i) {
-    threads[i].reset(new std::thread(Runner, &g_counter_for_mt_fast, i + 1));
+    threads[i] =
+        std::make_unique<std::thread>(Runner, &g_counter_for_mt_fast, i + 1);
   }
   // Let the threads run to completion.
   {

@@ -48,9 +48,9 @@
 #include <glog/logging.h>
 
 #include <folly/Portability.h>
-#include <folly/detail/Sleeper.h>
+#include <folly/synchronization/detail/Sleeper.h>
 
-#if !FOLLY_X64 && !FOLLY_A64 && !FOLLY_PPC64
+#if !FOLLY_X64 && !FOLLY_AARCH64 && !FOLLY_PPC64
 #error "PicoSpinLock.h is currently x64, aarch64 and ppc64 only."
 #endif
 
@@ -171,10 +171,11 @@ struct PicoSpinLock {
     }
 
 #undef FB_DOBTS
-#elif FOLLY_A64
-    ret =
-        !(__atomic_fetch_or(&lock_, kLockBitMask_, __ATOMIC_SEQ_CST) &
-          kLockBitMask_);
+#elif FOLLY_AARCH64
+    using SIntType = typename std::make_signed<UIntType>::type;
+    auto const lock = reinterpret_cast<SIntType*>(&lock_);
+    auto const mask = static_cast<SIntType>(kLockBitMask_);
+    return !(mask & __atomic_fetch_or(lock, mask, __ATOMIC_ACQUIRE));
 #elif FOLLY_PPC64
 #define FB_DOBTS(size)                                 \
     asm volatile("\teieio\n"                           \
@@ -254,8 +255,11 @@ struct PicoSpinLock {
     }
 
 #undef FB_DOBTR
-#elif FOLLY_A64
-    __atomic_fetch_and(&lock_, ~kLockBitMask_, __ATOMIC_SEQ_CST);
+#elif FOLLY_AARCH64
+    using SIntType = typename std::make_signed<UIntType>::type;
+    auto const lock = reinterpret_cast<SIntType*>(&lock_);
+    auto const mask = static_cast<SIntType>(kLockBitMask_);
+    __atomic_fetch_and(lock, ~mask, __ATOMIC_RELEASE);
 #elif FOLLY_PPC64
 #define FB_DOBTR(size)                                 \
     asm volatile("\teieio\n"                           \
@@ -284,4 +288,4 @@ struct PicoSpinLock {
   }
 };
 
-}
+} // namespace folly

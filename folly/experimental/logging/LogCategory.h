@@ -76,6 +76,15 @@ class LogCategory {
   }
 
   /**
+   * Get the log level and inheritance flag.
+   */
+  std::pair<LogLevel, bool> getLevelInfo() const {
+    auto value = level_.load(std::memory_order_acquire);
+    return {static_cast<LogLevel>(value & ~FLAG_INHERIT),
+            bool(value & FLAG_INHERIT)};
+  }
+
+  /**
    * Get the effective level for this log category.
    *
    * This is the minimum log level of this category and all of its parents.
@@ -155,6 +164,26 @@ class LogCategory {
    */
   std::vector<std::shared_ptr<LogHandler>> getHandlers() const;
 
+  /**
+   * Replace the list of LogHandlers with a completely new list.
+   */
+  void replaceHandlers(std::vector<std::shared_ptr<LogHandler>> handlers);
+
+  /**
+   * Update the LogHandlers attached to this LogCategory by replacing
+   * currently attached handlers with new LogHandler objects.
+   *
+   * The handlerMap argument is a map of (old_handler -> new_handler)
+   * If any of the LogHandlers currently attached to this category are found in
+   * the handlerMap, replace them with the new handler indicated in the map.
+   *
+   * This is used when the LogHandler configuration is changed requiring one or
+   * more LogHandler objects to be replaced with new ones.
+   */
+  void updateHandlers(const std::unordered_map<
+                      std::shared_ptr<LogHandler>,
+                      std::shared_ptr<LogHandler>>& handlerMap);
+
   /* Internal methods for use by other parts of the logging library code */
 
   /**
@@ -169,8 +198,9 @@ class LogCategory {
   void admitMessage(const LogMessage& message) const;
 
   /**
-   * Note: setLevelLocked() may only be called while holding the main
-   * LoggerDB lock.
+   * Note: setLevelLocked() may only be called while holding the
+   * LoggerDB loggersByName_ lock.  It is safe to call this while holding the
+   * loggersByName_ lock in read-mode; holding it exclusively is not required.
    *
    * This method should only be invoked by LoggerDB.
    */
@@ -190,6 +220,12 @@ class LogCategory {
 
  private:
   enum : uint32_t { FLAG_INHERIT = 0x80000000 };
+
+  // FLAG_INHERIT is the stored in the uppermost bit of the LogLevel field.
+  // assert that it does not conflict with valid LogLevel values.
+  static_assert(
+      static_cast<uint32_t>(LogLevel::MAX_LEVEL) < FLAG_INHERIT,
+      "The FLAG_INHERIT bit must not be set in any valid LogLevel value");
 
   // Forbidden copy constructor and assignment operator
   LogCategory(LogCategory const&) = delete;
@@ -240,9 +276,9 @@ class LogCategory {
 
   /**
    * Pointers to children and sibling loggers.
-   * These pointers should only ever be accessed while holding the main
-   * LoggerDB lock.  (These are only modified when creating new loggers,
-   * which occurs with the main LoggerDB lock held.)
+   * These pointers should only ever be accessed while holding the
+   * LoggerDB::loggersByName_ lock.  (These are only modified when creating new
+   * loggers, which occurs with the main LoggerDB lock held.)
    */
   LogCategory* firstChild_{nullptr};
   LogCategory* nextSibling_{nullptr};
@@ -256,4 +292,4 @@ class LogCategory {
    */
   std::vector<std::atomic<LogLevel>*> xlogLevels_;
 };
-}
+} // namespace folly

@@ -18,7 +18,7 @@
 #include <atomic>
 #include <vector>
 
-#include <folly/futures/Future.h>
+#include <folly/futures/Retrying.h>
 #include <folly/portability/GTest.h>
 #include <folly/portability/SysResource.h>
 #include "TestExecutor.h"
@@ -165,7 +165,8 @@ TEST(RetryingTest, large_retries) {
   PCHECK(getrlimit(RLIMIT_AS, &oldMemLimit) == 0);
 
   rlimit newMemLimit;
-  newMemLimit.rlim_cur = std::min(1UL << 30, oldMemLimit.rlim_max);
+  newMemLimit.rlim_cur =
+      std::min(static_cast<rlim_t>(1UL << 30), oldMemLimit.rlim_max);
   newMemLimit.rlim_max = oldMemLimit.rlim_max;
   if (!folly::kIsSanitizeAddress) { // ASAN reserves outside of the rlimit
     PCHECK(setrlimit(RLIMIT_AS, &newMemLimit) == 0);

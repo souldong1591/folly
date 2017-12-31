@@ -77,7 +77,8 @@ class GetFiberXMethodWorker(gdb.xmethod.XMethodWorker):
 
 class GetFiberXMethodMatcher(gdb.xmethod.XMethodMatcher):
     def __init__(self):
-        super(GetFiberXMethodMatcher, self).__init__("Fiber address method matcher")
+        super(GetFiberXMethodMatcher, self).__init__(
+            "Fiber address method matcher")
         self.worker = GetFiberXMethodWorker()
 
     def match(self, class_type, method_name):
@@ -252,6 +253,7 @@ def fiber_activate(fiber):
         fiber = fiber.cast(fiber_type.pointer()).dereference()
     if not FiberPrinter(fiber).backtrace_available():
         return "Can not activate a non-waiting fiber."
+    gdb.invalidate_cached_frames()
     FiberUnwinder.set_fiber(fiber)
     return "Fiber 0x{:12x} activated. You can call 'bt' now.".format(int(fiber.address))
 

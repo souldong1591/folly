@@ -24,12 +24,14 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <chrono>
+#include <memory>
 
-#include <folly/Bits.h>
+#include <folly/Format.h>
 #include <folly/SocketAddress.h>
 #include <folly/SpinLock.h>
 #include <folly/io/Cursor.h>
 #include <folly/io/IOBuf.h>
+#include <folly/lang/Bits.h>
 #include <folly/portability/OpenSSL.h>
 
 using folly::SocketAddress;
@@ -183,7 +185,7 @@ static BIO_METHOD* getSSLBioMethod() {
   return instance;
 }
 
-void* initsslBioMethod(void) {
+void* initsslBioMethod() {
   auto sslBioMethod = getSSLBioMethod();
   // override the bwrite method for MSG_EOR support
   OpenSSLUtils::setCustomBioWriteMethod(sslBioMethod, AsyncSSLSocket::bioWrite);
@@ -963,14 +965,14 @@ bool AsyncSSLSocket::willBlock(int ret,
     // The timeout (if set) keeps running here
     return true;
 #endif
-  } else if ((0
+  } else if ((false
 #ifdef SSL_ERROR_WANT_RSA_ASYNC_PENDING
-      || error == SSL_ERROR_WANT_RSA_ASYNC_PENDING
+              || error == SSL_ERROR_WANT_RSA_ASYNC_PENDING
 #endif
 #ifdef SSL_ERROR_WANT_ECDSA_ASYNC_PENDING
-      || error == SSL_ERROR_WANT_ECDSA_ASYNC_PENDING
+              || error == SSL_ERROR_WANT_ECDSA_ASYNC_PENDING
 #endif
-      )) {
+              )) {
     // Our custom openssl function has kicked off an async request to do
     // rsa/ecdsa private key operation.  When that call returns, a callback will
     // be invoked that will re-call handleAccept.
@@ -1646,7 +1648,8 @@ int AsyncSSLSocket::bioWrite(BIO* b, const char* in, int inl) {
     flags |= WriteFlags::CORK;
   }
 
-  int msg_flags = tsslSock->getSendMsgParamsCB()->getFlags(flags);
+  int msg_flags = tsslSock->getSendMsgParamsCB()->getFlags(
+      flags, false /*zeroCopyEnabled*/);
   msg.msg_controllen =
       tsslSock->getSendMsgParamsCB()->getAncillaryDataSize(flags);
   CHECK_GE(AsyncSocket::SendMsgParamsCallback::maxAncillaryDataSize,
@@ -1714,7 +1717,7 @@ int AsyncSSLSocket::sslVerifyCallback(
 
 void AsyncSSLSocket::enableClientHelloParsing()  {
     parseClientHello_ = true;
-    clientHelloInfo_.reset(new ssl::ClientHelloInfo());
+    clientHelloInfo_ = std::make_unique<ssl::ClientHelloInfo>();
 }
 
 void AsyncSSLSocket::resetClientHelloParsing(SSL *ssl)  {
@@ -1959,4 +1962,4 @@ void AsyncSSLSocket::getSSLServerCiphers(std::string& serverCiphers) const {
   }
 }
 
-} // namespace
+} // namespace folly

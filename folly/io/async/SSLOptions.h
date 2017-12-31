@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include <folly/Array.h>
+#include <folly/container/Array.h>
 #include <folly/io/async/SSLContext.h>
 
 namespace folly {
@@ -24,7 +24,7 @@ namespace ssl {
 
 namespace ssl_options_detail {
 void logDfatal(std::exception const&);
-}
+} // namespace ssl_options_detail
 
 struct SSLCommonOptions {
   /**

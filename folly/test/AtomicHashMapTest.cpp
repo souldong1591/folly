@@ -44,7 +44,7 @@ const int maxBMElements = int(FLAGS_numBMElements * LF); // hit our target LF.
 
 static int64_t nowInUsec() {
   timeval tv;
-  gettimeofday(&tv, 0);
+  gettimeofday(&tv, nullptr);
   return int64_t(tv.tv_sec) * 1000 * 1000 + tv.tv_usec;
 }
 
@@ -76,10 +76,10 @@ TEST(Ahm, BasicNoncopyable) {
   EXPECT_TRUE(myMap.begin() == myMap.end());
 
   for (int i = 0; i < 50; ++i) {
-    myMap.insert(make_pair(i, std::unique_ptr<int>(new int(i))));
+    myMap.insert(make_pair(i, std::make_unique<int>(i)));
   }
   for (int i = 50; i < 100; ++i) {
-    myMap.insert(i, std::unique_ptr<int>(new int (i)));
+    myMap.insert(i, std::make_unique<int>(i));
   }
   for (int i = 100; i < 150; ++i) {
     myMap.emplace(i, new int (i));
@@ -134,7 +134,9 @@ struct EqTraits {
 struct HashTraits {
   size_t operator()(const char* a) {
     size_t result = 0;
-    while (a[0] != 0) result += static_cast<size_t>(*(a++));
+    while (a[0] != 0) {
+      result += static_cast<size_t>(*(a++));
+    }
     return result;
   }
   size_t operator()(const char& a) {
@@ -142,7 +144,9 @@ struct HashTraits {
   }
   size_t operator()(const StringPiece a) {
     size_t result = 0;
-    for (const auto& ch : a) result += static_cast<size_t>(ch);
+    for (const auto& ch : a) {
+      result += static_cast<size_t>(ch);
+    }
     return result;
   }
 };
@@ -464,7 +468,7 @@ void runThreads(void *(*mainFunc)(void*)) {
   runThreads(mainFunc, FLAGS_numThreads, nullptr);
 }
 
-}
+} // namespace
 
 TEST(Ahm, collision_test) {
   const int numInserts = 1000000 / 4;
@@ -478,7 +482,7 @@ TEST(Ahm, collision_test) {
     " Byte entries replicated in " << FLAGS_numThreads <<
     " threads with " << FLAGS_maxLoadFactor * 100.0 << "% max load factor.";
 
-  globalAHM.reset(new AHMapT(int(numInserts * sizeFactor), config));
+  globalAHM = std::make_unique<AHMapT>(int(numInserts * sizeFactor), config);
 
   size_t sizeInit = globalAHM->capacity();
   VLOG(1) << "  Initial capacity: " << sizeInit;
@@ -555,7 +559,7 @@ void* raceInsertRandomThread(void*) {
   return nullptr;
 }
 
-}
+} // namespace
 
 // Test for race conditions when inserting and iterating at the same time and
 // creating multiple submaps.
@@ -567,7 +571,7 @@ TEST(Ahm, race_insert_iterate_thread_test) {
   VLOG(1) << "Testing iteration and insertion with " << kInsertThreads
     << " threads inserting and " << kIterateThreads << " threads iterating.";
 
-  globalAHM.reset(new AHMapT(raceFinalSizeEstimate / 9, config));
+  globalAHM = std::make_unique<AHMapT>(raceFinalSizeEstimate / 9, config);
 
   vector<pthread_t> threadIds;
   for (int j = 0; j < kInsertThreads + kIterateThreads; j++) {
@@ -619,7 +623,9 @@ void* testEraseEraseThread(void*) {
     int currentLevel;
     do {
       currentLevel = insertedLevel.load(std::memory_order_acquire);
-      if (currentLevel == kTestEraseInsertions) currentLevel += lag + 1;
+      if (currentLevel == kTestEraseInsertions) {
+        currentLevel += lag + 1;
+      }
     } while (currentLevel - lag < i);
 
     KeyT key = randomizeKey(i);
@@ -632,7 +638,7 @@ void* testEraseEraseThread(void*) {
   return nullptr;
 }
 
-}
+} // namespace
 
 // Here we have a single thread inserting some values, and several threads
 // racing to delete the values in the order they were inserted.
@@ -643,7 +649,7 @@ TEST(Ahm, thread_erase_insert_race) {
   VLOG(1) << "Testing insertion and erase with " << kInsertThreads
     << " thread inserting and " << kEraseThreads << " threads erasing.";
 
-  globalAHM.reset(new AHMapT(kTestEraseInsertions / 4, config));
+  globalAHM = std::make_unique<AHMapT>(kTestEraseInsertions / 4, config);
 
   vector<pthread_t> threadIds;
   for (int64_t j = 0; j < kInsertThreads + kEraseThreads; j++) {
@@ -673,7 +679,9 @@ auto atomicHashArrayInsertRaceArray = AHA::create(2, configRace);
 void* atomicHashArrayInsertRaceThread(void* /* j */) {
   AHA* arr = atomicHashArrayInsertRaceArray.get();
   uintptr_t numInserted = 0;
-  while (!runThreadsCreatedAllThreads.load());
+  while (!runThreadsCreatedAllThreads.load()) {
+    ;
+  }
   for (int i = 0; i < 2; i++) {
     if (arr->insert(RecordT(randomizeKey(i), 0)).first != arr->end()) {
       numInserted++;
@@ -812,7 +820,7 @@ void loadGlobalAhm() {
   std::cout << "loading global AHM with " << FLAGS_numThreads
             << " threads...\n";
   uint64_t start = nowInUsec();
-  globalAHM.reset(new AHMapT(maxBMElements, config));
+  globalAHM = std::make_unique<AHMapT>(maxBMElements, config);
   numOpsPerThread = FLAGS_numBMElements / FLAGS_numThreads;
   runThreads(insertThread);
   uint64_t elapsed = nowInUsec() - start;
@@ -825,7 +833,7 @@ void loadGlobalQPAhm() {
   std::cout << "loading global QPAHM with " << FLAGS_numThreads
             << " threads...\n";
   uint64_t start = nowInUsec();
-  globalQPAHM.reset(new QPAHMapT(maxBMElements, qpConfig));
+  globalQPAHM = std::make_unique<QPAHMapT>(maxBMElements, qpConfig);
   numOpsPerThread = FLAGS_numBMElements / FLAGS_numThreads;
   runThreads(qpInsertThread);
   uint64_t elapsed = nowInUsec() - start;
@@ -834,7 +842,7 @@ void loadGlobalQPAhm() {
   EXPECT_EQ(globalQPAHM->size(), FLAGS_numBMElements);
 }
 
-}
+} // namespace
 
 BENCHMARK(st_aha_find, iters) {
   CHECK_LE(iters, FLAGS_numBMElements);
@@ -867,7 +875,9 @@ BENCHMARK(mt_ahm_miss, iters) {
   numOpsPerThread = iters / FLAGS_numThreads;
   runThreads([](void* jj) -> void* {
     int64_t j = (int64_t) jj;
-    while (!runThreadsCreatedAllThreads.load());
+    while (!runThreadsCreatedAllThreads.load()) {
+      ;
+    }
     for (int i = 0; i < numOpsPerThread; ++i) {
       KeyT key = i + j * numOpsPerThread * 100;
       folly::doNotOptimizeAway(globalAHM->find(key) == globalAHM->end());
@@ -881,7 +891,9 @@ BENCHMARK(mt_qpahm_miss, iters) {
   numOpsPerThread = iters / FLAGS_numThreads;
   runThreads([](void* jj) -> void* {
     int64_t j = (int64_t) jj;
-    while (!runThreadsCreatedAllThreads.load());
+    while (!runThreadsCreatedAllThreads.load()) {
+      ;
+    }
     for (int i = 0; i < numOpsPerThread; ++i) {
       KeyT key = i + j * numOpsPerThread * 100;
       folly::doNotOptimizeAway(globalQPAHM->find(key) == globalQPAHM->end());
@@ -911,7 +923,9 @@ BENCHMARK(mt_ahm_find_insert_mix, iters) {
   numOpsPerThread = iters / FLAGS_numThreads;
   runThreads([](void* jj) -> void* {
     int64_t j = (int64_t) jj;
-    while (!runThreadsCreatedAllThreads.load());
+    while (!runThreadsCreatedAllThreads.load()) {
+      ;
+    }
     for (int i = 0; i < numOpsPerThread; ++i) {
       if (i % 128) {  // ~1% insert mix
         KeyT key = randomizeKey(i + j * numOpsPerThread);
@@ -931,7 +945,9 @@ BENCHMARK(mt_qpahm_find_insert_mix, iters) {
   numOpsPerThread = iters / FLAGS_numThreads;
   runThreads([](void* jj) -> void* {
     int64_t j = (int64_t) jj;
-    while (!runThreadsCreatedAllThreads.load());
+    while (!runThreadsCreatedAllThreads.load()) {
+      ;
+    }
     for (int i = 0; i < numOpsPerThread; ++i) {
       if (i % 128) {  // ~1% insert mix
         KeyT key = randomizeKey(i + j * numOpsPerThread);
@@ -950,7 +966,9 @@ BENCHMARK(mt_aha_find, iters) {
   numOpsPerThread = iters / FLAGS_numThreads;
   runThreads([](void* jj) -> void* {
       int64_t j = (int64_t) jj;
-      while (!runThreadsCreatedAllThreads.load());
+      while (!runThreadsCreatedAllThreads.load()) {
+        ;
+      }
       for (int i = 0; i < numOpsPerThread; ++i) {
         KeyT key = randomizeKey(i + j * numOpsPerThread);
         folly::doNotOptimizeAway(globalAHA->find(key)->second);
@@ -964,7 +982,9 @@ BENCHMARK(mt_ahm_find, iters) {
   numOpsPerThread = iters / FLAGS_numThreads;
   runThreads([](void* jj) -> void* {
     int64_t j = (int64_t) jj;
-    while (!runThreadsCreatedAllThreads.load());
+    while (!runThreadsCreatedAllThreads.load()) {
+      ;
+    }
     for (int i = 0; i < numOpsPerThread; ++i) {
       KeyT key = randomizeKey(i + j * numOpsPerThread);
       folly::doNotOptimizeAway(globalAHM->find(key)->second);
@@ -978,7 +998,9 @@ BENCHMARK(mt_qpahm_find, iters) {
   numOpsPerThread = iters / FLAGS_numThreads;
   runThreads([](void* jj) -> void* {
     int64_t j = (int64_t) jj;
-    while (!runThreadsCreatedAllThreads.load());
+    while (!runThreadsCreatedAllThreads.load()) {
+      ;
+    }
     for (int i = 0; i < numOpsPerThread; ++i) {
       KeyT key = randomizeKey(i + j * numOpsPerThread);
       folly::doNotOptimizeAway(globalQPAHM->find(key)->second);
@@ -998,7 +1020,7 @@ BENCHMARK(st_baseline_modulus_and_random, iters) {
 
 BENCHMARK(mt_ahm_insert, iters) {
   BENCHMARK_SUSPEND {
-    globalAHM.reset(new AHMapT(int(iters * LF), config));
+    globalAHM = std::make_unique<AHMapT>(int(iters * LF), config);
     numOpsPerThread = iters / FLAGS_numThreads;
   }
   runThreads(insertThread);
@@ -1006,7 +1028,7 @@ BENCHMARK(mt_ahm_insert, iters) {
 
 BENCHMARK(mt_qpahm_insert, iters) {
   BENCHMARK_SUSPEND {
-    globalQPAHM.reset(new QPAHMapT(int(iters * LF), qpConfig));
+    globalQPAHM = std::make_unique<QPAHMapT>(int(iters * LF), qpConfig);
     numOpsPerThread = iters / FLAGS_numThreads;
   }
   runThreads(qpInsertThread);

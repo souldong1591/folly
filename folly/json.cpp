@@ -22,8 +22,8 @@
 
 #include <boost/algorithm/string.hpp>
 #include <boost/next_prior.hpp>
-#include <folly/Bits.h>
 #include <folly/Portability.h>
+#include <folly/lang/Bits.h>
 
 #include <folly/Conv.h>
 #include <folly/Range.h>
@@ -597,7 +597,7 @@ dynamic parseValue(Input& in) {
          in.error("expected json value");
 }
 
-}
+} // namespace
 
 //////////////////////////////////////////////////////////////////////
 
@@ -813,7 +813,7 @@ std::string stripComments(StringPiece jsonC) {
   return result;
 }
 
-}
+} // namespace json
 
 //////////////////////////////////////////////////////////////////////
 
@@ -868,4 +868,4 @@ void PrintTo(const dynamic& dyn, std::ostream* os) {
 
 //////////////////////////////////////////////////////////////////////
 
-}
+} // namespace folly

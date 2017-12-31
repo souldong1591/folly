@@ -21,10 +21,14 @@
 #include <folly/FileUtil.h>
 #include <folly/String.h>
 #include <folly/experimental/logging/LogCategory.h>
+#include <folly/experimental/logging/LogConfig.h>
 #include <folly/experimental/logging/LogHandler.h>
+#include <folly/experimental/logging/LogHandlerFactory.h>
 #include <folly/experimental/logging/LogLevel.h>
 #include <folly/experimental/logging/Logger.h>
 #include <folly/experimental/logging/RateLimiter.h>
+
+using std::string;
 
 namespace folly {
 
@@ -55,7 +59,7 @@ class LoggerDBSingleton {
  private:
   LoggerDB* db_;
 };
-}
+} // namespace
 
 LoggerDB* LoggerDB::get() {
   // Intentionally leaky singleton
@@ -75,6 +79,8 @@ LoggerDB::LoggerDB() {
 }
 
 LoggerDB::LoggerDB(TestConstructorArg) : LoggerDB() {}
+
+LoggerDB::~LoggerDB() {}
 
 LogCategory* LoggerDB::getCategory(StringPiece name) {
   return getOrCreateCategoryLocked(*loggersByName_.wlock(), name);
@@ -101,38 +107,333 @@ void LoggerDB::setLevel(LogCategory* category, LogLevel level, bool inherit) {
   category->setLevelLocked(level, inherit);
 }
 
-std::vector<std::string> LoggerDB::processConfigString(
-    folly::StringPiece config) {
-  std::vector<std::string> errors;
-  if (config.empty()) {
-    return errors;
-  }
+LogConfig LoggerDB::getConfig() const {
+  auto handlerInfo = handlerInfo_.rlock();
 
-  std::vector<StringPiece> pieces;
-  folly::split(",", config, pieces);
-  for (const auto& p : pieces) {
-    auto idx = p.rfind('=');
-    if (idx == folly::StringPiece::npos) {
-      errors.emplace_back(
-          folly::sformat("missing '=' in logger configuration: \"{}\"", p));
+  LogConfig::HandlerConfigMap handlerConfigs;
+  std::unordered_map<std::shared_ptr<LogHandler>, string> handlersToName;
+  for (const auto& entry : handlerInfo->handlers) {
+    auto handler = entry.second.lock();
+    if (!handler) {
       continue;
     }
+    handlersToName.emplace(handler, entry.first);
+    handlerConfigs.emplace(entry.first, handler->getConfig());
+  }
 
-    auto category = p.subpiece(0, idx);
-    auto level_str = p.subpiece(idx + 1);
-    LogLevel level;
+  size_t anonymousNameIndex = 1;
+  auto generateAnonymousHandlerName = [&]() {
+    // Return a unique name of the form "anonymousHandlerN"
+    // Keep incrementing N until we find a name that isn't currently taken.
+    while (true) {
+      auto name = to<string>("anonymousHandler", anonymousNameIndex);
+      ++anonymousNameIndex;
+      if (handlerInfo->handlers.find(name) == handlerInfo->handlers.end()) {
+        return name;
+      }
+    }
+  };
+
+  LogConfig::CategoryConfigMap categoryConfigs;
+  {
+    auto loggersByName = loggersByName_.rlock();
+    for (const auto& entry : *loggersByName) {
+      auto* category = entry.second.get();
+      auto levelInfo = category->getLevelInfo();
+      auto handlers = category->getHandlers();
+
+      // Don't report categories that have default settings.
+      if (handlers.empty() && levelInfo.first == LogLevel::MAX_LEVEL &&
+          levelInfo.second) {
+        continue;
+      }
+
+      // Translate the handler pointers to names
+      std::vector<string> handlerNames;
+      for (const auto& handler : handlers) {
+        auto iter = handlersToName.find(handler);
+        if (iter == handlersToName.end()) {
+          // This LogHandler must have been manually attached to the category,
+          // rather than defined with `updateConfig()` or `resetConfig()`.
+          // Generate a unique name to use for reporting it in the config.
+          auto name = generateAnonymousHandlerName();
+          handlersToName.emplace(handler, name);
+          handlerConfigs.emplace(name, handler->getConfig());
+          handlerNames.emplace_back(name);
+        } else {
+          handlerNames.emplace_back(iter->second);
+        }
+      }
+
+      LogCategoryConfig categoryConfig(
+          levelInfo.first, levelInfo.second, handlerNames);
+      categoryConfigs.emplace(category->getName(), std::move(categoryConfig));
+    }
+  }
+
+  return LogConfig{std::move(handlerConfigs), std::move(categoryConfigs)};
+}
+
+/**
+ * Process handler config information when starting a config update operation.
+ */
+void LoggerDB::startConfigUpdate(
+    const Synchronized<HandlerInfo>::LockedPtr& handlerInfo,
+    const LogConfig& config,
+    NewHandlerMap* handlers,
+    OldToNewHandlerMap* oldToNewHandlerMap) {
+  // Get a map of all currently existing LogHandlers.
+  // This resolves weak_ptrs to shared_ptrs, and ignores expired weak_ptrs.
+  // This prevents any of these LogHandler pointers from expiring during the
+  // config update.
+  for (const auto& entry : handlerInfo->handlers) {
+    auto handler = entry.second.lock();
+    if (handler) {
+      handlers->emplace(entry.first, std::move(handler));
+    }
+  }
+
+  // Create all of the new LogHandlers needed from this configuration
+  for (const auto& entry : config.getHandlerConfigs()) {
+    // Check to see if there is an existing LogHandler with this name
+    std::shared_ptr<LogHandler> oldHandler;
+    auto iter = handlers->find(entry.first);
+    if (iter != handlers->end()) {
+      oldHandler = iter->second;
+    }
+
+    LogHandlerConfig updatedConfig;
+    const LogHandlerConfig* handlerConfig;
+    if (entry.second.type.hasValue()) {
+      handlerConfig = &entry.second;
+    } else {
+      // This configuration is intended to update an existing LogHandler
+      if (!oldHandler) {
+        throw std::invalid_argument(to<std::string>(
+            "cannot update unknown log handler \"", entry.first, "\""));
+      }
+
+      updatedConfig = oldHandler->getConfig();
+      if (!updatedConfig.type.hasValue()) {
+        // This normally should not happen unless someone improperly manually
+        // constructed a LogHandler object.  All existing LogHandler objects
+        // should indicate their type.
+        throw std::invalid_argument(to<std::string>(
+            "existing log handler \"",
+            entry.first,
+            "\" is missing type information"));
+      }
+      updatedConfig.update(entry.second);
+      handlerConfig = &updatedConfig;
+    }
+
+    // Look up the LogHandlerFactory
+    auto factoryIter = handlerInfo->factories.find(handlerConfig->type.value());
+    if (factoryIter == handlerInfo->factories.end()) {
+      throw std::invalid_argument(to<std::string>(
+          "unknown log handler type \"", handlerConfig->type.value(), "\""));
+    }
+
+    // Create the new log handler
+    const auto& factory = factoryIter->second;
+    std::shared_ptr<LogHandler> handler;
     try {
-      level = stringToLogLevel(level_str);
+      if (oldHandler) {
+        handler = factory->updateHandler(oldHandler, handlerConfig->options);
+        if (handler != oldHandler) {
+          oldToNewHandlerMap->emplace(oldHandler, handler);
+        }
+      } else {
+        handler = factory->createHandler(handlerConfig->options);
+      }
     } catch (const std::exception& ex) {
-      errors.emplace_back(folly::sformat(
-          "invalid log level \"{}\" for category \"{}\"", level_str, category));
-      continue;
+      // Errors creating or updating the the log handler are generally due to
+      // bad configuration options.  It is useful to update the exception
+      // message to include the name of the log handler we were trying to
+      // update or create.
+      throw std::invalid_argument(to<string>(
+          "error ",
+          oldHandler ? "updating" : "creating",
+          " log handler \"",
+          entry.first,
+          "\": ",
+          exceptionStr(ex)));
     }
-
-    setLevel(category, level);
+    handlerInfo->handlers[entry.first] = handler;
+    (*handlers)[entry.first] = handler;
   }
 
-  return errors;
+  // Before we start making any LogCategory changes, confirm that all handlers
+  // named in the category configs are known handlers.
+  for (const auto& entry : config.getCategoryConfigs()) {
+    if (!entry.second.handlers.hasValue()) {
+      continue;
+    }
+    for (const auto& handlerName : entry.second.handlers.value()) {
+      auto iter = handlers->find(handlerName);
+      if (iter == handlers->end()) {
+        throw std::invalid_argument(to<std::string>(
+            "unknown log handler \"",
+            handlerName,
+            "\" configured for log category \"",
+            entry.first,
+            "\""));
+      }
+    }
+  }
+}
+
+/**
+ * Update handlerInfo_ at the end of a config update operation.
+ */
+void LoggerDB::finishConfigUpdate(
+    const Synchronized<HandlerInfo>::LockedPtr& handlerInfo,
+    NewHandlerMap* handlers,
+    OldToNewHandlerMap* oldToNewHandlerMap) {
+  // Build a new map to replace handlerInfo->handlers
+  // This will contain only the LogHandlers that are still in use by the
+  // current LogCategory settings.
+  std::unordered_map<std::string, std::weak_ptr<LogHandler>> newHandlerMap;
+  for (const auto& entry : *handlers) {
+    newHandlerMap.emplace(entry.first, entry.second);
+  }
+  // Drop all of our shared_ptr references to LogHandler objects,
+  // and then remove entries in newHandlerMap that are unreferenced.
+  handlers->clear();
+  oldToNewHandlerMap->clear();
+  handlerInfo->handlers.clear();
+  for (auto iter = newHandlerMap.begin(); iter != newHandlerMap.end(); /**/) {
+    if (iter->second.expired()) {
+      iter = newHandlerMap.erase(iter);
+    } else {
+      ++iter;
+    }
+  }
+  handlerInfo->handlers.swap(newHandlerMap);
+}
+
+std::vector<std::shared_ptr<LogHandler>> LoggerDB::buildCategoryHandlerList(
+    const NewHandlerMap& handlerMap,
+    StringPiece categoryName,
+    const std::vector<std::string>& categoryHandlerNames) {
+  std::vector<std::shared_ptr<LogHandler>> catHandlers;
+  for (const auto& handlerName : categoryHandlerNames) {
+    auto iter = handlerMap.find(handlerName);
+    if (iter == handlerMap.end()) {
+      // This really shouldn't be possible; the checks in startConfigUpdate()
+      // should have already bailed out if there was an unknown handler.
+      throw std::invalid_argument(to<std::string>(
+          "bug: unknown log handler \"",
+          handlerName,
+          "\" configured for log category \"",
+          categoryName,
+          "\""));
+    }
+    catHandlers.push_back(iter->second);
+  }
+
+  return catHandlers;
+}
+
+void LoggerDB::updateConfig(const LogConfig& config) {
+  // Grab the handlerInfo_ lock.
+  // We hold it in write mode for the entire config update operation.  This
+  // ensures that only a single config update operation ever runs at once.
+  auto handlerInfo = handlerInfo_.wlock();
+
+  NewHandlerMap handlers;
+  OldToNewHandlerMap oldToNewHandlerMap;
+  startConfigUpdate(handlerInfo, config, &handlers, &oldToNewHandlerMap);
+
+  // If an existing LogHandler was replaced with a new one,
+  // walk all current LogCategories and replace this handler.
+  if (!oldToNewHandlerMap.empty()) {
+    auto loggerMap = loggersByName_.rlock();
+    for (const auto& entry : *loggerMap) {
+      entry.second->updateHandlers(oldToNewHandlerMap);
+    }
+  }
+
+  // Update log levels and handlers mentioned in the config update
+  auto loggersByName = loggersByName_.wlock();
+  for (const auto& entry : config.getCategoryConfigs()) {
+    LogCategory* category =
+        getOrCreateCategoryLocked(*loggersByName, entry.first);
+
+    // Update the log handlers
+    if (entry.second.handlers.hasValue()) {
+      auto catHandlers = buildCategoryHandlerList(
+          handlers, entry.first, entry.second.handlers.value());
+      category->replaceHandlers(std::move(catHandlers));
+    }
+
+    // Update the level settings
+    category->setLevelLocked(
+        entry.second.level, entry.second.inheritParentLevel);
+  }
+
+  finishConfigUpdate(handlerInfo, &handlers, &oldToNewHandlerMap);
+}
+
+void LoggerDB::resetConfig(const LogConfig& config) {
+  // Grab the handlerInfo_ lock.
+  // We hold it in write mode for the entire config update operation.  This
+  // ensures that only a single config update operation ever runs at once.
+  auto handlerInfo = handlerInfo_.wlock();
+
+  NewHandlerMap handlers;
+  OldToNewHandlerMap oldToNewHandlerMap;
+  startConfigUpdate(handlerInfo, config, &handlers, &oldToNewHandlerMap);
+
+  // Make sure all log categories mentioned in the new config exist.
+  // This ensures that we will cover them in our walk below.
+  LogCategory* rootCategory;
+  {
+    auto loggersByName = loggersByName_.wlock();
+    rootCategory = getOrCreateCategoryLocked(*loggersByName, "");
+    for (const auto& entry : config.getCategoryConfigs()) {
+      getOrCreateCategoryLocked(*loggersByName, entry.first);
+    }
+  }
+
+  {
+    // Update all log categories
+    auto loggersByName = loggersByName_.rlock();
+    for (const auto& entry : *loggersByName) {
+      auto* category = entry.second.get();
+
+      auto configIter = config.getCategoryConfigs().find(category->getName());
+      if (configIter == config.getCategoryConfigs().end()) {
+        // This category is not listed in the config settings.
+        // Reset it to the default settings.
+        category->clearHandlers();
+
+        if (category == rootCategory) {
+          category->setLevelLocked(LogLevel::ERR, false);
+        } else {
+          category->setLevelLocked(LogLevel::MAX_LEVEL, true);
+        }
+        continue;
+      }
+
+      const auto& catConfig = configIter->second;
+
+      // Update the category log level
+      category->setLevelLocked(catConfig.level, catConfig.inheritParentLevel);
+
+      // Update the category handlers list.
+      // If the handler list is not set in the config, clear out any existing
+      // handlers rather than leaving it as-is.
+      std::vector<std::shared_ptr<LogHandler>> catHandlers;
+      if (catConfig.handlers.hasValue()) {
+        catHandlers = buildCategoryHandlerList(
+            handlers, entry.first, catConfig.handlers.value());
+      }
+      category->replaceHandlers(std::move(catHandlers));
+    }
+  }
+
+  finishConfigUpdate(handlerInfo, &handlers, &oldToNewHandlerMap);
 }
 
 LogCategory* LoggerDB::getOrCreateCategoryLocked(
@@ -173,6 +474,18 @@ void LoggerDB::cleanupHandlers() {
     }
   }
 
+  // Also extract our HandlerFactoryMap and HandlerMap, so we can clear them
+  // later without holding the handlerInfo_ lock.
+  HandlerFactoryMap factories;
+  HandlerMap handlers;
+  {
+    auto handlerInfo = handlerInfo_.wlock();
+    factories.swap(handlerInfo->factories);
+    handlers.swap(handlerInfo->handlers);
+  }
+
+  // Remove all of the LogHandlers from all log categories,
+  // to drop any shared_ptr references to the LogHandlers
   for (auto* category : categories) {
     category->clearHandlers();
   }
@@ -197,6 +510,31 @@ size_t LoggerDB::flushAllHandlers() {
     handler->flush();
   }
   return handlers.size();
+}
+
+void LoggerDB::registerHandlerFactory(
+    std::unique_ptr<LogHandlerFactory> factory,
+    bool replaceExisting) {
+  auto type = factory->getType();
+  auto handlerInfo = handlerInfo_.wlock();
+  if (replaceExisting) {
+    handlerInfo->factories[type.str()] = std::move(factory);
+  } else {
+    auto ret = handlerInfo->factories.emplace(type.str(), std::move(factory));
+    if (!ret.second) {
+      throw std::range_error(to<std::string>(
+          "a LogHandlerFactory for the type \"", type, "\" already exists"));
+    }
+  }
+}
+
+void LoggerDB::unregisterHandlerFactory(StringPiece type) {
+  auto handlerInfo = handlerInfo_.wlock();
+  auto numRemoved = handlerInfo->factories.erase(type.str());
+  if (numRemoved != 1) {
+    throw std::range_error(
+        to<std::string>("no LogHandlerFactory for type \"", type, "\" found"));
+  }
 }
 
 LogLevel LoggerDB::xlogInit(
@@ -316,4 +654,4 @@ void LoggerDB::defaultInternalWarningImpl(
     folly::writeFull(STDERR_FILENO, fullMsg.data(), fullMsg.size());
   }
 }
-}
+} // namespace folly

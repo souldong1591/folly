@@ -26,9 +26,9 @@
 #include <boost/random.hpp>
 
 #include <folly/FBString.h>
-#include <folly/Foreach.h>
 #include <folly/Random.h>
 #include <folly/Traits.h>
+#include <folly/container/Foreach.h>
 #include <folly/portability/GTest.h>
 
 using namespace std;
@@ -67,7 +67,7 @@ template <class T> T randomObject();
 template <> int randomObject<int>() {
   return random(0, 1024);
 }
-}
+} // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
 // Tests begin here
@@ -123,7 +123,7 @@ TEST(fbvector, works_with_std_string) {
 
 namespace {
 class UserDefinedType { int whatevs_; };
-}
+} // namespace
 
 FOLLY_ASSUME_FBVECTOR_COMPATIBLE(UserDefinedType);
 
@@ -191,7 +191,7 @@ TEST(fbvector, unique_ptr) {
 
   v[0] = std::move(p);
   EXPECT_FALSE(v[0].get());
-  v[0].reset(new int(32));
+  v[0] = std::make_unique<int>(32);
   std::unique_ptr<int> somePtr;
   v.insert(v.begin(), std::move(somePtr));
   EXPECT_EQ(*v[1], 32);

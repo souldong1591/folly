@@ -14,13 +14,13 @@
  * limitations under the License.
  */
 
-#include <folly/Baton.h>
+#include <folly/futures/Future.h>
 #include <folly/Executor.h>
 #include <folly/Memory.h>
 #include <folly/Unit.h>
 #include <folly/dynamic.h>
-#include <folly/futures/Future.h>
 #include <folly/portability/GTest.h>
+#include <folly/synchronization/Baton.h>
 
 #include <algorithm>
 #include <atomic>
@@ -88,7 +88,7 @@ Future<int> onErrorHelperEggs(const eggs_t&) {
 Future<int> onErrorHelperGeneric(const std::exception&) {
   return makeFuture(20);
 }
-}
+} // namespace
 
 TEST(Future, onError) {
   bool theFlag = false;
@@ -561,7 +561,7 @@ TEST(Future, thenBindTry) {
 }
 
 TEST(Future, value) {
-  auto f = makeFuture(std::unique_ptr<int>(new int(42)));
+  auto f = makeFuture(std::make_unique<int>(42));
   auto up = std::move(f.value());
   EXPECT_EQ(42, *up);
 
@@ -854,6 +854,11 @@ TEST(Future, RequestContext) {
 
   struct MyRequestData : RequestData {
     MyRequestData(bool value = false) : value(value) {}
+
+    bool hasCallback() override {
+      return false;
+    }
+
     bool value;
   };
 
@@ -935,4 +940,36 @@ TEST(Future, invokeCallbackReturningFutureAsRvalue) {
   EXPECT_EQ(103, makeFuture<int>(100).then(foo).value());
   EXPECT_EQ(203, makeFuture<int>(200).then(cfoo).value());
   EXPECT_EQ(303, makeFuture<int>(300).then(Foo()).value());
+}
+
+TEST(Future, futureWithinCtxCleanedUpWhenTaskFinishedInTime) {
+  // Used to track the use_count of callbackInput even outside of its scope
+  std::weak_ptr<int> target;
+  {
+    Promise<std::shared_ptr<int>> promise;
+    auto input = std::make_shared<int>(1);
+    auto longEnough = std::chrono::milliseconds(1000);
+
+    promise.getFuture()
+        .within(longEnough)
+        .then([&target](
+                  folly::Try<std::shared_ptr<int>>&& callbackInput) mutable {
+          target = callbackInput.value();
+        });
+    promise.setValue(input);
+  }
+  // After promise's life cycle is finished, make sure no one is holding the
+  // input anymore, in other words, ctx should have been cleaned up.
+  EXPECT_EQ(0, target.use_count());
+}
+
+TEST(Future, futureWithinNoValueReferenceWhenTimeOut) {
+  Promise<std::shared_ptr<int>> promise;
+  auto veryShort = std::chrono::milliseconds(1);
+
+  promise.getFuture().within(veryShort).then(
+      [](folly::Try<std::shared_ptr<int>>&& callbackInput) {
+        // Timeout is fired. Verify callbackInput is not referenced
+        EXPECT_EQ(0, callbackInput.value().use_count());
+      });
 }

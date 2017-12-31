@@ -281,12 +281,27 @@ inline exception_wrapper exception_wrapper::SharedPtr::get_exception_ptr_(
 }
 
 template <class Ex, typename... As>
-inline exception_wrapper::exception_wrapper(OnHeapTag, in_place_type_t<Ex>, As&&... as)
+inline exception_wrapper::exception_wrapper(
+    ThrownTag,
+    in_place_type_t<Ex>,
+    As&&... as)
+    : eptr_{std::make_exception_ptr(Ex(std::forward<As>(as)...)),
+            reinterpret_cast<std::uintptr_t>(std::addressof(typeid(Ex))) + 1u},
+      vptr_(&ExceptionPtr::ops_) {}
+
+template <class Ex, typename... As>
+inline exception_wrapper::exception_wrapper(
+    OnHeapTag,
+    in_place_type_t<Ex>,
+    As&&... as)
     : sptr_{std::make_shared<SharedPtr::Impl<Ex>>(std::forward<As>(as)...)},
       vptr_(&SharedPtr::ops_) {}
 
 template <class Ex, typename... As>
-inline exception_wrapper::exception_wrapper(InSituTag, in_place_type_t<Ex>, As&&... as)
+inline exception_wrapper::exception_wrapper(
+    InSituTag,
+    in_place_type_t<Ex>,
+    As&&... as)
     : buff_{in_place_type<Ex>, std::forward<As>(as)...},
       vptr_(&InPlace<Ex>::ops_) {}
 
@@ -335,7 +350,7 @@ Ex&& dont_slice(Ex&& ex) {
         "be sliced when storing in exception_wrapper.");
   return std::forward<Ex>(ex);
 }
-}
+} // namespace exception_wrapper_detail
 
 template <
     class Ex,

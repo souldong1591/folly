@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Facebook, Inc.
+ * Copyright 2017-present Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -53,7 +53,7 @@ TEST(FiberManager, batonTimedWaitTimeout) {
       manager.addTask([&]() {
         Baton baton;
 
-        auto res = baton.timed_wait(std::chrono::milliseconds(230));
+        auto res = baton.try_wait_for(std::chrono::milliseconds(230));
 
         EXPECT_FALSE(res);
         EXPECT_EQ(5, iterations);
@@ -63,7 +63,7 @@ TEST(FiberManager, batonTimedWaitTimeout) {
       manager.addTask([&]() {
         Baton baton;
 
-        auto res = baton.timed_wait(std::chrono::milliseconds(130));
+        auto res = baton.try_wait_for(std::chrono::milliseconds(130));
 
         EXPECT_FALSE(res);
         EXPECT_EQ(3, iterations);
@@ -95,7 +95,7 @@ TEST(FiberManager, batonTimedWaitPost) {
         Baton baton;
         baton_ptr = &baton;
 
-        auto res = baton.timed_wait(std::chrono::milliseconds(130));
+        auto res = baton.try_wait_for(std::chrono::milliseconds(130));
 
         EXPECT_TRUE(res);
         EXPECT_EQ(2, iterations);
@@ -128,7 +128,7 @@ TEST(FiberManager, batonTimedWaitTimeoutEvb) {
     Baton baton;
 
     auto start = EventBaseLoopController::Clock::now();
-    auto res = baton.timed_wait(std::chrono::milliseconds(timeout_ms));
+    auto res = baton.try_wait_for(std::chrono::milliseconds(timeout_ms));
     auto finish = EventBaseLoopController::Clock::now();
 
     EXPECT_FALSE(res);
@@ -170,7 +170,7 @@ TEST(FiberManager, batonTimedWaitPostEvb) {
       evb.tryRunAfterDelay([&]() { baton.post(); }, 100);
 
       auto start = EventBaseLoopController::Clock::now();
-      auto res = baton.timed_wait(std::chrono::milliseconds(130));
+      auto res = baton.try_wait_for(std::chrono::milliseconds(130));
       auto finish = EventBaseLoopController::Clock::now();
 
       EXPECT_TRUE(res);
@@ -903,18 +903,24 @@ namespace {
 void expectMainContext(bool& ran, int* mainLocation, int* fiberLocation) {
   int here;
   /* 2 pages is a good guess */
-  constexpr ssize_t DISTANCE = 0x2000 / sizeof(int);
+  constexpr auto const kHereToFiberMaxDist = 0x2000 / sizeof(int);
+
+  // With ASAN's detect_stack_use_after_return=1, this must be much larger
+  // I measured 410028 on x86_64, so allow for quadruple that, just in case.
+  constexpr auto const kHereToMainMaxDist =
+      folly::kIsSanitizeAddress ? 4 * 410028 : kHereToFiberMaxDist;
+
   if (fiberLocation) {
-    EXPECT_TRUE(std::abs(&here - fiberLocation) > DISTANCE);
+    EXPECT_GT(std::abs(&here - fiberLocation), kHereToFiberMaxDist);
   }
   if (mainLocation) {
-    EXPECT_TRUE(std::abs(&here - mainLocation) < DISTANCE);
+    EXPECT_LT(std::abs(&here - mainLocation), kHereToMainMaxDist);
   }
 
   EXPECT_FALSE(ran);
   ran = true;
 }
-}
+} // namespace
 
 TEST(FiberManager, runInMainContext) {
   FiberManager manager(std::make_unique<SimpleLoopController>());
@@ -2051,14 +2057,14 @@ TEST(FiberManager, VirtualEventBase) {
 
     getFiberManager(*evb1).addTaskRemote([&] {
       Baton baton;
-      baton.timed_wait(std::chrono::milliseconds{100});
+      baton.try_wait_for(std::chrono::milliseconds{100});
 
       done1 = true;
     });
 
     getFiberManager(evb2).addTaskRemote([&] {
       Baton baton;
-      baton.timed_wait(std::chrono::milliseconds{200});
+      baton.try_wait_for(std::chrono::milliseconds{200});
 
       done2 = true;
     });
@@ -2071,6 +2077,43 @@ TEST(FiberManager, VirtualEventBase) {
     EXPECT_FALSE(done2);
   }
   EXPECT_TRUE(done2);
+}
+
+TEST(TimedMutex, ThreadsAndFibersDontDeadlock) {
+  folly::EventBase evb;
+  auto& fm = getFiberManager(evb);
+  TimedMutex mutex;
+  std::thread testThread([&] {
+    for (int i = 0; i < 100; i++) {
+      mutex.lock();
+      mutex.unlock();
+      {
+        Baton b;
+        b.try_wait_for(std::chrono::milliseconds(1));
+      }
+    }
+  });
+
+  for (int numFibers = 0; numFibers < 100; numFibers++) {
+    fm.addTask([&] {
+      for (int i = 0; i < 20; i++) {
+        mutex.lock();
+        {
+          Baton b;
+          b.try_wait_for(std::chrono::milliseconds(1));
+        }
+        mutex.unlock();
+        {
+          Baton b;
+          b.try_wait_for(std::chrono::milliseconds(1));
+        }
+      }
+    });
+  }
+
+  evb.loop();
+  EXPECT_EQ(0, fm.hasTasks());
+  testThread.join();
 }
 
 TEST(TimedMutex, ThreadFiberDeadlockOrder) {

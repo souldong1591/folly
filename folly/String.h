@@ -34,6 +34,7 @@
 #include <folly/Portability.h>
 #include <folly/Range.h>
 #include <folly/ScopeGuard.h>
+#include <folly/Traits.h>
 
 // Compatibility function, to make sure toStdString(s) can be called
 // to convert a std::string or fbstring variable s into type std::string
@@ -211,12 +212,15 @@ std::string& stringVAppendf(std::string* out, const char* format, va_list ap);
  * C++, use cEscape instead.  This function is for display purposes
  * only.
  */
-template <class String1, class String2>
-void backslashify(const String1& input, String2& output, bool hex_style=false);
+template <class OutputString>
+void backslashify(
+    folly::StringPiece input,
+    OutputString& output,
+    bool hex_style = false);
 
-template <class String>
-String backslashify(const String& input, bool hex_style=false) {
-  String output;
+template <class OutputString = std::string>
+OutputString backslashify(StringPiece input, bool hex_style = false) {
+  OutputString output;
   backslashify(input, output, hex_style);
   return output;
 }
@@ -465,56 +469,22 @@ void splitTo(const Delim& delimiter,
  * Note that this will likely not work if the last field's target is of numeric
  * type, in which case folly::to<> will throw an exception.
  */
-template <class T, class Enable = void>
-struct IsSomeVector {
-  enum { value = false };
-};
+namespace detail {
+template <typename Void, typename OutputType>
+struct IsConvertible : std::false_type {};
 
-template <class T>
-struct IsSomeVector<std::vector<T>, void> {
-  enum { value = true };
-};
-
-template <class T>
-struct IsSomeVector<fbvector<T>, void> {
-  enum { value = true };
-};
-
-template <class T, class Enable = void>
-struct IsConvertible {
-  enum { value = false };
-};
-
-template <class T>
+template <typename OutputType>
 struct IsConvertible<
-    T,
-    decltype(static_cast<void>(
-        parseTo(std::declval<folly::StringPiece>(), std::declval<T&>())))> {
-  enum { value = true };
-};
-
-template <class... Types>
-struct AllConvertible;
-
-template <class Head, class... Tail>
-struct AllConvertible<Head, Tail...> {
-  enum { value = IsConvertible<Head>::value && AllConvertible<Tail...>::value };
-};
-
-template <>
-struct AllConvertible<> {
-  enum { value = true };
-};
-
-static_assert(AllConvertible<float>::value, "");
-static_assert(AllConvertible<int>::value, "");
-static_assert(AllConvertible<bool>::value, "");
-static_assert(AllConvertible<int>::value, "");
-static_assert(!AllConvertible<std::vector<int>>::value, "");
+    void_t<decltype(parseTo(StringPiece{}, std::declval<OutputType&>()))>,
+    OutputType> : std::true_type {};
+} // namespace detail
+template <typename OutputType>
+struct IsConvertible : detail::IsConvertible<void, OutputType> {};
 
 template <bool exact = true, class Delim, class... OutputTypes>
 typename std::enable_if<
-    AllConvertible<OutputTypes...>::value && sizeof...(OutputTypes) >= 1,
+    StrictConjunction<IsConvertible<OutputTypes>...>::value &&
+        sizeof...(OutputTypes) >= 1,
     bool>::type
 split(const Delim& delimiter, StringPiece input, OutputTypes&... outputs);
 
@@ -618,12 +588,17 @@ std::string stripLeftMargin(std::string s);
  * Leaves all other characters unchanged, including those with the 0x80
  * bit set.
  * @param str String to convert
- * @param len Length of str, in bytes
+ * @param length Length of str, in bytes
  */
 void toLowerAscii(char* str, size_t length);
 
 inline void toLowerAscii(MutableStringPiece str) {
   toLowerAscii(str.begin(), str.size());
+}
+
+inline void toLowerAscii(std::string& str) {
+  // str[0] is legal also if the string is empty.
+  toLowerAscii(&str[0], str.size());
 }
 
 template <

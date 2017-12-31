@@ -16,9 +16,9 @@
 
 #include <folly/dynamic.h>
 
-#include <folly/Assume.h>
 #include <folly/Format.h>
-#include <folly/Hash.h>
+#include <folly/hash/Hash.h>
+#include <folly/lang/Assume.h>
 #include <folly/portability/BitsFunctexcept.h>
 
 namespace folly {
@@ -310,7 +310,9 @@ char const* dynamic::typeName(Type t) {
 
 void dynamic::destroy() noexcept {
   // This short-circuit speeds up some microbenchmarks.
-  if (type_ == NULLT) return;
+  if (type_ == NULLT) {
+    return;
+  }
 
 #define FB_X(T) detail::Destroy::destroy(getAddress<T>())
   FB_DYNAMIC_APPLY(type_, FB_X);
@@ -321,4 +323,4 @@ void dynamic::destroy() noexcept {
 
 //////////////////////////////////////////////////////////////////////
 
-}
+} // namespace folly

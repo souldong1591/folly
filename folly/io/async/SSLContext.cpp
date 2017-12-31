@@ -21,8 +21,8 @@
 #include <folly/Random.h>
 #include <folly/SharedMutex.h>
 #include <folly/SpinLock.h>
-#include <folly/ThreadId.h>
 #include <folly/ssl/Init.h>
+#include <folly/system/ThreadId.h>
 
 // ---------------------------------------------------------------------
 // SSLContext implementation
@@ -206,7 +206,7 @@ void SSLContext::loadCertificate(const char* path, const char* format) {
          "loadCertificateChain: either <path> or <format> is nullptr");
   }
   if (strcmp(format, "PEM") == 0) {
-    if (SSL_CTX_use_certificate_chain_file(ctx_, path) == 0) {
+    if (SSL_CTX_use_certificate_chain_file(ctx_, path) != 1) {
       int errnoCopy = errno;
       std::string reason("SSL_CTX_use_certificate_chain_file: ");
       reason.append(path);
@@ -285,6 +285,32 @@ void SSLContext::loadPrivateKeyFromBufferPEM(folly::StringPiece pkey) {
   if (SSL_CTX_use_PrivateKey(ctx_, key.get()) == 0) {
     throw std::runtime_error("SSL_CTX_use_PrivateKey: " + getErrors());
   }
+}
+
+void SSLContext::loadCertKeyPairFromBufferPEM(
+    folly::StringPiece cert,
+    folly::StringPiece pkey) {
+  loadCertificateFromBufferPEM(cert);
+  loadPrivateKeyFromBufferPEM(pkey);
+  if (!isCertKeyPairValid()) {
+    throw std::runtime_error("SSL certificate and private key do not match");
+  }
+}
+
+void SSLContext::loadCertKeyPairFromFiles(
+    const char* certPath,
+    const char* keyPath,
+    const char* certFormat,
+    const char* keyFormat) {
+  loadCertificate(certPath, certFormat);
+  loadPrivateKey(keyPath, keyFormat);
+  if (!isCertKeyPairValid()) {
+    throw std::runtime_error("SSL certificate and private key do not match");
+  }
+}
+
+bool SSLContext::isCertKeyPairValid() const {
+  return SSL_CTX_check_private_key(ctx_) == 1;
 }
 
 void SSLContext::loadTrustedCertificates(const char* path) {
@@ -573,8 +599,7 @@ void SSLContext::setSessionCacheContext(const std::string& context) {
       ctx_,
       reinterpret_cast<const unsigned char*>(context.data()),
       std::min<unsigned int>(
-          static_cast<unsigned int>(context.length()),
-          SSL_MAX_SSL_SESSION_ID_LENGTH));
+          static_cast<unsigned int>(context.length()), SSL_MAX_SID_CTX_LENGTH));
 }
 
 /**
@@ -624,10 +649,6 @@ int SSLContext::passwordCallback(char* password,
   auto const length = std::min(userPassword.size(), size_t(size));
   std::memcpy(password, userPassword.data(), length);
   return int(length);
-}
-
-void SSLContext::setSSLLockTypes(std::map<int, LockType> inLockTypes) {
-  folly::ssl::setLockTypes(inLockTypes);
 }
 
 #if defined(SSL_MODE_HANDSHAKE_CUTTHROUGH)

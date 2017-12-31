@@ -1211,7 +1211,9 @@ TEST(EventBaseTest, RunInEventBaseThreadAndWait) {
     th.join();
   }
   size_t sum = 0;
-  for (auto& atom : atoms) sum += *atom;
+  for (auto& atom : atoms) {
+    sum += *atom;
+  }
   EXPECT_EQ(c, sum);
 }
 
@@ -1412,7 +1414,7 @@ TEST(EventBaseTest, CancelRunInLoop) {
   // Run the loop
   eventBase.loop();
 
-  // cancelC1 and cancelC3 should have both fired after 10 iterations and
+  // cancelC1 and cancelC2 should have both fired after 10 iterations and
   // stopped re-installing themselves
   ASSERT_EQ(cancelC1.getCount(), 0);
   ASSERT_EQ(cancelC2.getCount(), 0);
@@ -1608,7 +1610,7 @@ TEST(EventBaseTest, IdleTime) {
     ASSERT_EQ(6, tos0.getTimeouts());
     ASSERT_GE(6100, eventBase.getAvgLoopTime() - 1200);
     ASSERT_LE(6100, eventBase.getAvgLoopTime() + 1200);
-    tos.reset(new IdleTimeTimeoutSeries(&eventBase, timeouts));
+    tos = std::make_unique<IdleTimeTimeoutSeries>(&eventBase, timeouts);
   });
 
   // Kick things off with an "immedite" timeout
@@ -1912,15 +1914,44 @@ TEST(EventBaseTest, DrivableExecutorTest) {
 TEST(EventBaseTest, RequestContextTest) {
   EventBase evb;
   auto defaultCtx = RequestContext::get();
+  std::weak_ptr<RequestContext> rctx_weak_ptr;
 
   {
     RequestContextScopeGuard rctx;
+    rctx_weak_ptr = RequestContext::saveContext();
     auto context = RequestContext::get();
     EXPECT_NE(defaultCtx, context);
     evb.runInLoop([context] { EXPECT_EQ(context, RequestContext::get()); });
+    evb.loop();
   }
 
+  // Ensure that RequestContext created for the scope has been released and
+  // deleted.
+  EXPECT_EQ(rctx_weak_ptr.expired(), true);
+
   EXPECT_EQ(defaultCtx, RequestContext::get());
-  evb.loop();
+}
+
+TEST(EventBaseTest, CancelLoopCallbackRequestContextTest) {
+  EventBase evb;
+  CountedLoopCallback c(&evb, 1);
+
+  auto defaultCtx = RequestContext::get();
+  EXPECT_EQ(defaultCtx, RequestContext::get());
+  std::weak_ptr<RequestContext> rctx_weak_ptr;
+
+  {
+    RequestContextScopeGuard rctx;
+    rctx_weak_ptr = RequestContext::saveContext();
+    auto context = RequestContext::get();
+    EXPECT_NE(defaultCtx, context);
+    evb.runInLoop(&c);
+    c.cancelLoopCallback();
+  }
+
+  // Ensure that RequestContext created for the scope has been released and
+  // deleted.
+  EXPECT_EQ(rctx_weak_ptr.expired(), true);
+
   EXPECT_EQ(defaultCtx, RequestContext::get());
 }

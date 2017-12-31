@@ -59,8 +59,8 @@
 #endif
 
 #include <folly/concurrency/CacheLocality.h>
-#include <folly/experimental/AsymmetricMemoryBarrier.h>
 #include <folly/experimental/hazptr/debug.h>
+#include <folly/synchronization/AsymmetricMemoryBarrier.h>
 
 #include <mutex> // for thread caching
 #include <unordered_set> // for hash set in bulk reclamation
@@ -117,17 +117,21 @@ static_assert(
 
 struct hazptr_tc {
   hazptr_tc_entry entry_[HAZPTR_TC_SIZE];
-  int count_;
+  size_t count_;
+  bool local_; // for debug mode only
 
  public:
+  hazptr_tc_entry& operator[](size_t i);
   hazptr_rec* get();
   bool put(hazptr_rec* hprec);
+  size_t count();
 };
 
 static_assert(
     std::is_trivial<hazptr_tc>::value,
     "hazptr_tc must be trivial to avoid a branch to check initialization");
 
+hazptr_tc* hazptr_tc_tls();
 void hazptr_tc_init();
 void hazptr_tc_shutdown();
 hazptr_rec* hazptr_tc_try_get();
@@ -201,15 +205,71 @@ inline void hazptr_obj_base<T, D>::retire(hazptr_domain& domain, D deleter) {
 }
 
 /**
+ *  hazptr_obj_base_refcounted
+ */
+
+template <typename T, typename D>
+inline void hazptr_obj_base_refcounted<T, D>::retire(
+    hazptr_domain& domain,
+    D deleter) {
+  DEBUG_PRINT(this << " " << &domain);
+  deleter_ = std::move(deleter);
+  reclaim_ = [](hazptr_obj* p) {
+    auto hrobp = static_cast<hazptr_obj_base_refcounted*>(p);
+    if (hrobp->release_ref()) {
+      auto obj = static_cast<T*>(hrobp);
+      hrobp->deleter_(obj);
+    }
+  };
+  if (HAZPTR_PRIV &&
+      (HAZPTR_ONE_DOMAIN || (&domain == &default_hazptr_domain()))) {
+    if (hazptr_priv_try_retire(this)) {
+      return;
+    }
+  }
+  domain.objRetire(this);
+}
+
+template <typename T, typename D>
+inline void hazptr_obj_base_refcounted<T, D>::acquire_ref() {
+  DEBUG_PRINT(this);
+  auto oldval = refcount_.fetch_add(1);
+  DCHECK(oldval >= 0);
+}
+
+template <typename T, typename D>
+inline void hazptr_obj_base_refcounted<T, D>::acquire_ref_safe() {
+  DEBUG_PRINT(this);
+  auto oldval = refcount_.load(std::memory_order_acquire);
+  DCHECK(oldval >= 0);
+  refcount_.store(oldval + 1, std::memory_order_release);
+}
+
+template <typename T, typename D>
+inline bool hazptr_obj_base_refcounted<T, D>::release_ref() {
+  DEBUG_PRINT(this);
+  auto oldval = refcount_.load(std::memory_order_acquire);
+  if (oldval > 0) {
+    oldval = refcount_.fetch_sub(1);
+  } else {
+    if (kIsDebug) {
+      refcount_.store(-1);
+    }
+  }
+  DEBUG_PRINT(this << " " << oldval);
+  DCHECK(oldval >= 0);
+  return oldval == 0;
+}
+
+/**
  *  hazptr_rec
  */
 
-class hazptr_rec {
+class alignas(hardware_destructive_interference_size) hazptr_rec {
   friend class hazptr_domain;
   friend class hazptr_holder;
   friend struct hazptr_tc_entry;
 
-  FOLLY_ALIGN_TO_AVOID_FALSE_SHARING
   std::atomic<const void*> hazptr_{nullptr};
   hazptr_rec* next_{nullptr};
   std::atomic<bool> active_{false};
@@ -243,7 +303,7 @@ FOLLY_ALWAYS_INLINE hazptr_holder::hazptr_holder(hazptr_domain& domain) {
   if (hazptr_ == nullptr) { std::bad_alloc e; throw e; }
 }
 
-FOLLY_ALWAYS_INLINE hazptr_holder::hazptr_holder(std::nullptr_t) {
+FOLLY_ALWAYS_INLINE hazptr_holder::hazptr_holder(std::nullptr_t) noexcept {
   domain_ = nullptr;
   hazptr_ = nullptr;
   DEBUG_PRINT(this << " " << domain_ << " " << hazptr_);
@@ -350,6 +410,186 @@ FOLLY_ALWAYS_INLINE void swap(hazptr_holder& lhs, hazptr_holder& rhs) noexcept {
   lhs.swap(rhs);
 }
 
+/**
+ *  hazptr_array
+ */
+
+template <size_t M>
+FOLLY_ALWAYS_INLINE hazptr_array<M>::hazptr_array() {
+  auto h = reinterpret_cast<hazptr_holder*>(&raw_);
+  if (HAZPTR_TC) {
+    auto ptc = hazptr_tc_tls();
+    if (LIKELY(ptc != nullptr)) {
+      auto& tc = *ptc;
+      auto count = tc.count();
+      if (M <= count) {
+        size_t offset = count - M;
+        for (size_t i = 0; i < M; ++i) {
+          auto hprec = tc[offset + i].hprec_;
+          DCHECK(hprec != nullptr);
+          DEBUG_PRINT(i << " " << &h[i]);
+          new (&h[i]) hazptr_holder(nullptr);
+          h[i].hazptr_ = hprec;
+          DEBUG_PRINT(
+              i << " " << &h[i] << " " << h[i].domain_ << " " << h[i].hazptr_);
+        }
+        tc.count_ = offset;
+        return;
+      }
+    }
+  }
+  // slow path
+  for (size_t i = 0; i < M; ++i) {
+    new (&h[i]) hazptr_holder;
+    DEBUG_PRINT(
+        i << " " << &h[i] << " " << h[i].domain_ << " " << h[i].hazptr_);
+  }
+}
+
+template <size_t M>
+FOLLY_ALWAYS_INLINE hazptr_array<M>::hazptr_array(
+    hazptr_array&& other) noexcept {
+  DEBUG_PRINT(this << " " << M << " " << &other);
+  auto h = reinterpret_cast<hazptr_holder*>(&raw_);
+  auto hother = reinterpret_cast<hazptr_holder*>(&other.raw_);
+  for (size_t i = 0; i < M; ++i) {
+    new (&h[i]) hazptr_holder(std::move(hother[i]));
+    DEBUG_PRINT(i << " " << &h[i] << " " << &hother[i]);
+  }
+  empty_ = other.empty_;
+  other.empty_ = true;
+}
+
+template <size_t M>
+FOLLY_ALWAYS_INLINE hazptr_array<M>::hazptr_array(std::nullptr_t) noexcept {
+  DEBUG_PRINT(this << " " << M);
+  auto h = reinterpret_cast<hazptr_holder*>(&raw_);
+  for (size_t i = 0; i < M; ++i) {
+    new (&h[i]) hazptr_holder(nullptr);
+    DEBUG_PRINT(i << " " << &h[i]);
+  }
+  empty_ = true;
+}
+
+template <size_t M>
+FOLLY_ALWAYS_INLINE hazptr_array<M>::~hazptr_array() {
+  if (empty_) {
+    return;
+  }
+  auto h = reinterpret_cast<hazptr_holder*>(&raw_);
+  if (HAZPTR_TC) {
+    auto ptc = hazptr_tc_tls();
+    if (LIKELY(ptc != nullptr)) {
+      auto& tc = *ptc;
+      auto count = tc.count();
+      if ((M <= HAZPTR_TC_SIZE) && (count + M <= HAZPTR_TC_SIZE)) {
+        for (size_t i = 0; i < M; ++i) {
+          tc[count + i].hprec_ = h[i].hazptr_;
+          DEBUG_PRINT(i << " " << &h[i]);
+          new (&h[i]) hazptr_holder(nullptr);
+          DEBUG_PRINT(
+              i << " " << &h[i] << " " << h[i].domain_ << " " << h[i].hazptr_);
+        }
+        tc.count_ = count + M;
+        return;
+      }
+    }
+  }
+  // slow path
+  for (size_t i = 0; i < M; ++i) {
+    h[i].~hazptr_holder();
+  }
+}
+
+template <size_t M>
+FOLLY_ALWAYS_INLINE hazptr_array<M>& hazptr_array<M>::operator=(
+    hazptr_array&& other) noexcept {
+  DEBUG_PRINT(this << " " << M << " " << &other);
+  auto h = reinterpret_cast<hazptr_holder*>(&raw_);
+  for (size_t i = 0; i < M; ++i) {
+    h[i] = std::move(other[i]);
+    DEBUG_PRINT(i << " " << &h[i] << " " << &other[i]);
+  }
+  empty_ = other.empty_;
+  other.empty_ = true;
+  return *this;
+}
+
+template <size_t M>
+FOLLY_ALWAYS_INLINE hazptr_holder& hazptr_array<M>::operator[](
+    size_t i) noexcept {
+  auto h = reinterpret_cast<hazptr_holder*>(&raw_);
+  DCHECK(i < M);
+  return h[i];
+}
+
+/**
+ *  hazptr_local
+ */
+
+template <size_t M>
+FOLLY_ALWAYS_INLINE hazptr_local<M>::hazptr_local() {
+  auto h = reinterpret_cast<hazptr_holder*>(&raw_);
+  if (HAZPTR_TC) {
+    auto ptc = hazptr_tc_tls();
+    if (LIKELY(ptc != nullptr)) {
+      auto& tc = *ptc;
+      auto count = tc.count();
+      if (M <= count) {
+        if (kIsDebug) {
+          DCHECK(!tc.local_);
+          tc.local_ = true;
+        }
+        // Fast path
+        for (size_t i = 0; i < M; ++i) {
+          auto hprec = tc[i].hprec_;
+          DCHECK(hprec != nullptr);
+          DEBUG_PRINT(i << " " << &h[i]);
+          new (&h[i]) hazptr_holder(nullptr);
+          h[i].hazptr_ = hprec;
+          DEBUG_PRINT(
+              i << " " << &h[i] << " " << h[i].domain_ << " " << h[i].hazptr_);
+        }
+        return;
+      }
+    }
+  }
+  // Slow path
+  need_destruct_ = true;
+  for (size_t i = 0; i < M; ++i) {
+    new (&h[i]) hazptr_holder;
+    DEBUG_PRINT(
+        i << " " << &h[i] << " " << h[i].domain_ << " " << h[i].hazptr_);
+  }
+}
+
+template <size_t M>
+FOLLY_ALWAYS_INLINE hazptr_local<M>::~hazptr_local() {
+  if (LIKELY(!need_destruct_)) {
+    if (kIsDebug) {
+      auto ptc = hazptr_tc_tls();
+      DCHECK(ptc != nullptr);
+      auto& tc = *ptc;
+      DCHECK(tc.local_);
+      tc.local_ = false;
+    }
+    return;
+  }
+  // Slow path
+  auto h = reinterpret_cast<hazptr_holder*>(&raw_);
+  for (size_t i = 0; i < M; ++i) {
+    h[i].~hazptr_holder();
+  }
+}
+
+template <size_t M>
+FOLLY_ALWAYS_INLINE hazptr_holder& hazptr_local<M>::operator[](
+    size_t i) noexcept {
+  auto h = reinterpret_cast<hazptr_holder*>(&raw_);
+  DCHECK(i < M);
+  return h[i];
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // [TODO]:
 // - Control of reclamation (when and by whom)
@@ -360,6 +600,11 @@ FOLLY_ALWAYS_INLINE void swap(hazptr_holder& lhs, hazptr_holder& rhs) noexcept {
 FOLLY_ALWAYS_INLINE hazptr_domain& default_hazptr_domain() {
   DEBUG_PRINT(&default_domain_);
   return default_domain_;
+}
+
+template <typename T, typename D>
+FOLLY_ALWAYS_INLINE void hazptr_retire(T* obj, D reclaim) {
+  default_hazptr_domain().retire(obj, std::move(reclaim));
 }
 
 /** hazptr_rec */
@@ -409,6 +654,21 @@ inline const void* hazptr_obj::getObjPtr() const {
 
 /** hazptr_domain */
 
+template <typename T, typename D>
+void hazptr_domain::retire(T* obj, D reclaim) {
+  struct hazptr_retire_node : hazptr_obj {
+    std::unique_ptr<T, D> obj_;
+
+    hazptr_retire_node(T* obj, D reclaim) : obj_{obj, std::move(reclaim)} {}
+  };
+
+  auto node = new hazptr_retire_node(obj, std::move(reclaim));
+  node->reclaim_ = [](hazptr_obj* p) {
+    delete static_cast<hazptr_retire_node*>(p);
+  };
+  objRetire(node);
+}
+
 inline hazptr_domain::~hazptr_domain() {
   DEBUG_PRINT(this);
   { /* reclaim all remaining retired objects */
@@ -417,6 +677,7 @@ inline hazptr_domain::~hazptr_domain() {
     while (retired) {
       for (auto p = retired; p; p = next) {
         next = p->next_;
+        DEBUG_PRINT(this << " " << p << " " << p->reclaim_);
         (*(p->reclaim_))(p);
       }
       retired = retired_.exchange(nullptr);
@@ -453,8 +714,9 @@ inline hazptr_rec* hazptr_domain::hazptrAcquire() {
   p->active_.store(true, std::memory_order_relaxed);
   p->next_ = hazptrs_.load(std::memory_order_acquire);
   while (!hazptrs_.compare_exchange_weak(
-      p->next_, p, std::memory_order_release, std::memory_order_acquire))
+      p->next_, p, std::memory_order_release, std::memory_order_acquire)) {
     /* keep trying */;
+  }
   auto hcount = hcount_.fetch_add(1);
   DEBUG_PRINT(this << " " << p << " " << sizeof(hazptr_rec) << " " << hcount);
   return p;
@@ -633,6 +895,11 @@ inline void hazptr_tc_entry::evict() {
 
 /** hazptr_tc */
 
+FOLLY_ALWAYS_INLINE hazptr_tc_entry& hazptr_tc::operator[](size_t i) {
+  DCHECK(i <= HAZPTR_TC_SIZE);
+  return entry_[i];
+}
+
 FOLLY_ALWAYS_INLINE hazptr_rec* hazptr_tc::get() {
   if (LIKELY(count_ != 0)) {
     auto hprec = entry_[--count_].get();
@@ -652,7 +919,41 @@ FOLLY_ALWAYS_INLINE bool hazptr_tc::put(hazptr_rec* hprec) {
   return false;
 }
 
+FOLLY_ALWAYS_INLINE size_t hazptr_tc::count() {
+  return count_;
+}
+
 /** hazptr_tc free functions */
+
+FOLLY_ALWAYS_INLINE hazptr_tc* hazptr_tc_tls() {
+  DEBUG_PRINT(tls_state_);
+  if (LIKELY(tls_state_ == TLS_ALIVE)) {
+    DEBUG_PRINT(tls_state_);
+    return &tls_tc_data_;
+  } else if (tls_state_ == TLS_UNINITIALIZED) {
+    tls_life_odr_use();
+    return &tls_tc_data_;
+  }
+  return nullptr;
+}
+
+inline void hazptr_tc_init() {
+  DEBUG_PRINT("");
+  auto& tc = tls_tc_data_;
+  DEBUG_PRINT(&tc);
+  tc.count_ = 0;
+  if (kIsDebug) {
+    tc.local_ = false;
+  }
+}
+
+inline void hazptr_tc_shutdown() {
+  auto& tc = tls_tc_data_;
+  DEBUG_PRINT(&tc);
+  for (size_t i = 0; i < tc.count_; ++i) {
+    tc.entry_[i].evict();
+  }
+}
 
 FOLLY_ALWAYS_INLINE hazptr_rec* hazptr_tc_try_get() {
   DEBUG_PRINT(TLS_UNINITIALIZED << TLS_ALIVE << TLS_DESTROYED);
@@ -674,24 +975,6 @@ FOLLY_ALWAYS_INLINE bool hazptr_tc_try_put(hazptr_rec* hprec) {
     return tls_tc_data_.put(hprec);
   }
   return false;
-}
-
-inline void hazptr_tc_init() {
-  DEBUG_PRINT("");
-  auto& tc = tls_tc_data_;
-  DEBUG_PRINT(&tc);
-  tc.count_ = 0;
-  for (int i = 0; i < HAZPTR_TC_SIZE; ++i) {
-    tc.entry_[i].hprec_ = nullptr;
-  }
-}
-
-inline void hazptr_tc_shutdown() {
-  auto& tc = tls_tc_data_;
-  DEBUG_PRINT(&tc);
-  for (int i = 0; i < tc.count_; ++i) {
-    tc.entry_[i].evict();
-  }
 }
 
 /**
@@ -786,5 +1069,5 @@ inline hazptr_tls_life::~hazptr_tls_life() {
   tls_state_ = TLS_DESTROYED;
 }
 
-} // namespace folly
 } // namespace hazptr
+} // namespace folly

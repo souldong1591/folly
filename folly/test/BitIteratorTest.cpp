@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include <folly/Bits.h>
+#include <folly/BitIterator.h>
 
 #include <algorithm>
 #include <limits>
@@ -150,7 +150,7 @@ void runRealFFSTest(int iters) {
   }
 }
 
-}
+} // namespace
 
 TEST(BitIterator, SimpleFindFirstSet) {
   runSimpleFFSTest(1);

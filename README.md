@@ -83,6 +83,19 @@ folly/test subdirectory as `gtest`:
      rm -f release-1.8.0.tar.gz && \
      mv googletest-release-1.8.0 gtest)
 
+#### Linking non-default boost libraries
+
+If you have boost installed in a non-default location, you need to be sure that
+the linker and configure scripts know where to find boost.  This means making
+sure that the `LIBRARY_PATH` environment variable contains `<BOOST_ROOT>/lib`,
+as well as including the path explicitly when running
+`./configure`:
+
+```
+export LIBRARY_PATH=$BOOST_ROOT/lib:$LIBRARY_PATH
+./configure --with-boost=$BOOST_ROOT/lib
+```
+
 #### Ubuntu 12.04
 
 This release is old, requiring many upgrades. However, since Travis CI runs
@@ -137,7 +150,7 @@ sudo apt-get install \
 
 The above packages are sufficient for Ubuntu 13.10 and Ubuntu 14.04.
 
-In the folly directory, run
+In the folly directory, run:
 ```
   autoreconf -ivf
   ./configure
@@ -145,6 +158,10 @@ In the folly directory, run
   make check
   sudo make install
 ```
+
+#### Ubuntu 16.04 LTS
+The packages listed above for 13.10 and 14.04 are sufficient for installation,
+and the build commands remain the same.
 
 #### OS X (Homebrew)
 
@@ -198,6 +215,12 @@ Download and install folly with the parameters listed below:
   make
   sudo make install
 ```
+
+#### Windows (Vcpkg)
+
+folly is available in [Vcpkg](https://github.com/Microsoft/vcpkg#vcpkg) and releases may be built via `vcpkg install folly:x64-windows`.
+
+You may also use `vcpkg install folly:x64-windows --head` to build against `master`.
 
 #### Other Linux distributions
 

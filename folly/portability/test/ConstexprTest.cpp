@@ -21,53 +21,18 @@
 namespace {
 
 class ConstexprTest : public testing::Test {};
+} // namespace
+
+TEST_F(ConstexprTest, constexpr_strlen_cstr) {
+  constexpr auto v = "hello";
+  constexpr auto a = folly::constexpr_strlen(v);
+  EXPECT_EQ(5, a);
+  EXPECT_TRUE((std::is_same<const size_t, decltype(a)>::value));
 }
 
-TEST_F(ConstexprTest, constexpr_abs_unsigned) {
-  constexpr auto v = uint32_t(17);
-  constexpr auto a = folly::constexpr_abs(v);
-  EXPECT_EQ(17, a);
-  EXPECT_TRUE((std::is_same<const uint32_t, decltype(a)>::value));
-}
-
-TEST_F(ConstexprTest, constexpr_abs_signed_positive) {
-  constexpr auto v = int32_t(17);
-  constexpr auto a = folly::constexpr_abs(v);
-  EXPECT_EQ(17, a);
-  EXPECT_TRUE((std::is_same<const uint32_t, decltype(a)>::value));
-}
-
-TEST_F(ConstexprTest, constexpr_abs_signed_negative) {
-  constexpr auto v = int32_t(-17);
-  constexpr auto a = folly::constexpr_abs(v);
-  EXPECT_EQ(17, a);
-  EXPECT_TRUE((std::is_same<const uint32_t, decltype(a)>::value));
-}
-
-TEST_F(ConstexprTest, constexpr_abs_float_positive) {
-  constexpr auto v = 17.5f;
-  constexpr auto a = folly::constexpr_abs(v);
-  EXPECT_EQ(17.5, a);
-  EXPECT_TRUE((std::is_same<const float, decltype(a)>::value));
-}
-
-TEST_F(ConstexprTest, constexpr_abs_float_negative) {
-  constexpr auto v = -17.5f;
-  constexpr auto a = folly::constexpr_abs(v);
-  EXPECT_EQ(17.5, a);
-  EXPECT_TRUE((std::is_same<const float, decltype(a)>::value));
-}
-
-TEST_F(ConstexprTest, constexpr_abs_double_positive) {
-  constexpr auto v = 17.5;
-  constexpr auto a = folly::constexpr_abs(v);
-  EXPECT_EQ(17.5, a);
-  EXPECT_TRUE((std::is_same<const double, decltype(a)>::value));
-}
-
-TEST_F(ConstexprTest, constexpr_abs_double_negative) {
-  constexpr auto v = -17.5;
-  constexpr auto a = folly::constexpr_abs(v);
-  EXPECT_EQ(17.5, a);
-  EXPECT_TRUE((std::is_same<const double, decltype(a)>::value));
+TEST_F(ConstexprTest, constexpr_strlen_ints) {
+  constexpr int v[] = {5, 3, 4, 0, 7};
+  constexpr auto a = folly::constexpr_strlen(v);
+  EXPECT_EQ(3, a);
+  EXPECT_TRUE((std::is_same<const size_t, decltype(a)>::value));
 }

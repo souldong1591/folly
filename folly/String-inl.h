@@ -355,7 +355,7 @@ bool splitFixed(
   return false;
 }
 
-}
+} // namespace detail
 
 //////////////////////////////////////////////////////////////////////
 
@@ -401,7 +401,8 @@ void splitTo(const Delim& delimiter,
 
 template <bool exact, class Delim, class... OutputTypes>
 typename std::enable_if<
-    AllConvertible<OutputTypes...>::value && sizeof...(OutputTypes) >= 1,
+    StrictConjunction<IsConvertible<OutputTypes>...>::value &&
+        sizeof...(OutputTypes) >= 1,
     bool>::type
 split(const Delim& delimiter, StringPiece input, OutputTypes&... outputs) {
   return detail::splitFixed<exact>(
@@ -491,8 +492,11 @@ void join(const Delim& delimiter,
     output);
 }
 
-template <class String1, class String2>
-void backslashify(const String1& input, String2& output, bool hex_style) {
+template <class OutputString>
+void backslashify(
+    folly::StringPiece input,
+    OutputString& output,
+    bool hex_style) {
   static const char hexValues[] = "0123456789abcdef";
   output.clear();
   output.reserve(3 * input.size());
@@ -504,14 +508,21 @@ void backslashify(const String1& input, String2& output, bool hex_style) {
       if (hex_style) {
         hex_append = true;
       } else {
-        if (c == '\r') output += 'r';
-        else if (c == '\n') output += 'n';
-        else if (c == '\t') output += 't';
-        else if (c == '\a') output += 'a';
-        else if (c == '\b') output += 'b';
-        else if (c == '\0') output += '0';
-        else if (c == '\\') output += '\\';
-        else {
+        if (c == '\r') {
+          output += 'r';
+        } else if (c == '\n') {
+          output += 'n';
+        } else if (c == '\t') {
+          output += 't';
+        } else if (c == '\a') {
+          output += 'a';
+        } else if (c == '\b') {
+          output += 'b';
+        } else if (c == '\0') {
+          output += '0';
+        } else if (c == '\\') {
+          output += '\\';
+        } else {
           hex_append = true;
         }
       }
@@ -573,7 +584,9 @@ void humanify(const String1& input, String2& output) {
 template <class InputString, class OutputString>
 bool hexlify(const InputString& input, OutputString& output,
              bool append_output) {
-  if (!append_output) output.clear();
+  if (!append_output) {
+    output.clear();
+  }
 
   static char hexValues[] = "0123456789abcdef";
   auto j = output.size();

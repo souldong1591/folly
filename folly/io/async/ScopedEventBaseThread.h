@@ -19,8 +19,8 @@
 #include <memory>
 #include <thread>
 
-#include <folly/Baton.h>
 #include <folly/io/async/EventBase.h>
+#include <folly/synchronization/Baton.h>
 
 namespace folly {
 
@@ -69,4 +69,4 @@ class ScopedEventBaseThread {
   folly::Baton<> stop_;
 };
 
-}
+} // namespace folly

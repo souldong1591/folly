@@ -156,10 +156,38 @@ template <typename T>
 using _t = typename T::type;
 
 /**
+ * A type trait to remove all const volatile and reference qualifiers on a
+ * type T
+ */
+template <typename T>
+struct remove_cvref {
+  using type =
+      typename std::remove_cv<typename std::remove_reference<T>::type>::type;
+};
+template <typename T>
+using remove_cvref_t = typename remove_cvref<T>::type;
+
+/**
+ *  type_t
+ *
+ *  A type alias for the first template type argument. `type_t` is useful for
+ *  controlling class-template and function-template partial specialization.
+ *
+ *  Example:
+ *
+ *    template <typename Value>
+ *    class Container {
+ *     public:
+ *      template <typename... Args>
+ *      Container(
+ *          type_t<in_place_t, decltype(Value(std::declval<Args>()...))>,
+ *          Args&&...);
+ *    };
+ *
  *  void_t
  *
  *  A type alias for `void`. `void_t` is useful for controling class-template
- *  partial specialization.
+ *  and function-template partial specialization.
  *
  *  Example:
  *
@@ -172,23 +200,48 @@ using _t = typename T::type;
  *    struct has_value_type<T, folly::void_t<typename T::value_type>>
  *        : std::true_type {};
  */
-#if defined(__cpp_lib_void_t) || defined(_MSC_VER)
 
-/* using override */ using std::void_t;
-
-#else // defined(__cpp_lib_void_t) || defined(_MSC_VER)
+/**
+ * There is a bug in libstdc++, libc++, and MSVC's STL that causes it to
+ * ignore unused template parameter arguments in template aliases and does not
+ * cause substitution failures. This defect has been recorded here:
+ * http://open-std.org/JTC1/SC22/WG21/docs/cwg_defects.html#1558.
+ *
+ * This causes the implementation of std::void_t to be buggy, as it is likely
+ * defined as something like the following:
+ *
+ *  template <typename...>
+ *  using void_t = void;
+ *
+ * This causes the compiler to ignore all the template arguments and does not
+ * help when one wants to cause substitution failures.  Rather declarations
+ * which have void_t in orthogonal specializations are treated as the same.
+ * For example, assuming the possible `T` types are only allowed to have
+ * either the alias `one` or `two` and never both or none:
+ *
+ *  template <typename T,
+ *            typename std::void_t<std::decay_t<T>::one>* = nullptr>
+ *  void foo(T&&) {}
+ *  template <typename T,
+ *            typename std::void_t<std::decay_t<T>::two>* = nullptr>
+ *  void foo(T&&) {}
+ *
+ * The second foo() will be a redefinition because it conflicts with the first
+ * one; void_t does not cause substitution failures - the template types are
+ * just ignored.
+ */
 
 namespace traits_detail {
-template <class...>
-struct void_t_ {
-  using type = void;
+template <class T, class...>
+struct type_t_ {
+  using type = T;
 };
 } // namespace traits_detail
 
+template <class T, class... Ts>
+using type_t = typename traits_detail::type_t_<T, Ts...>::type;
 template <class... Ts>
-using void_t = _t<traits_detail::void_t_<Ts...>>;
-
-#endif // defined(__cpp_lib_void_t) || defined(_MSC_VER)
+using void_t = type_t<void, Ts...>;
 
 /**
  * IsRelocatable<T>::value describes the ability of moving around
@@ -267,11 +320,12 @@ struct is_trivially_copyable : std::is_trivial<T> {};
 template <class T>
 using is_trivially_copyable = std::is_trivially_copyable<T>;
 #endif
-}
+} // namespace traits_detail
 
 struct Ignore {
+  Ignore() = default;
   template <class T>
-  /* implicit */ Ignore(const T&) {}
+  constexpr /* implicit */ Ignore(const T&) {}
   template <class T>
   const Ignore& operator=(T const&) const { return *this; }
 };
@@ -288,7 +342,7 @@ struct IsEqualityComparable
           decltype(std::declval<T>() == std::declval<U>()),
           bool
       > {};
-}
+} // namespace traits_detail_IsEqualityComparable
 
 /* using override */ using traits_detail_IsEqualityComparable::
     IsEqualityComparable;
@@ -302,7 +356,7 @@ struct IsLessThanComparable
           decltype(std::declval<T>() < std::declval<U>()),
           bool
       > {};
-}
+} // namespace traits_detail_IsLessThanComparable
 
 /* using override */ using traits_detail_IsLessThanComparable::
     IsLessThanComparable;
@@ -330,7 +384,7 @@ struct IsNothrowSwappable
         noexcept(swap(std::declval<T&>(), std::declval<T&>()))
       > {};
 #endif
-}
+} // namespace traits_detail_IsNothrowSwappable
 
 /* using override */ using traits_detail_IsNothrowSwappable::IsNothrowSwappable;
 
@@ -386,11 +440,11 @@ struct Bools {
 
 // Lighter-weight than Conjunction, but evaluates all sub-conditions eagerly.
 template <class... Ts>
-struct StrictConjunction 
-  : std::is_same<Bools<Ts::value...>, Bools<(Ts::value || true)...>> {};
+struct StrictConjunction
+    : std::is_same<Bools<Ts::value...>, Bools<(Ts::value || true)...>> {};
 
 template <class... Ts>
-struct StrictDisjunction 
+struct StrictDisjunction
   : Negation<
       std::is_same<Bools<Ts::value...>, Bools<(Ts::value && false)...>>
     > {};

@@ -50,10 +50,17 @@ class ImmediateFileWriter : public LogWriter {
   void writeMessage(folly::StringPiece buffer, uint32_t flags = 0) override;
   void flush() override;
 
+  /**
+   * Get the output file.
+   */
+  const folly::File& getFile() const {
+    return file_;
+  }
+
  private:
   ImmediateFileWriter(ImmediateFileWriter const&) = delete;
   ImmediateFileWriter& operator=(ImmediateFileWriter const&) = delete;
 
   folly::File file_;
 };
-}
+} // namespace folly

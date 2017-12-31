@@ -24,7 +24,7 @@
 #include <event.h>
 
 #ifdef _MSC_VER
-#include <event2/event_compat.h>
+#include <event2/event_compat.h> // @manual
 #include <folly/portability/Fcntl.h>
 #endif
 
@@ -63,4 +63,4 @@ folly_event_set(event* e, int fd, short s, EventSetCallback f, void* arg) {
   auto lfd = getLibeventFd(fd);
   event_set(e, lfd, s, f, arg);
 }
-}
+} // namespace folly

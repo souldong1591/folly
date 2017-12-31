@@ -439,7 +439,9 @@ AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn,
               Allocator, ProbeFcn, KeyConvertFcn>::
     encodeIndex(uint32_t subMap, uint32_t offset) {
   DCHECK_EQ(offset & kSecondaryMapBit_, 0);  // offset can't be too big
-  if (subMap == 0) return offset;
+  if (subMap == 0) {
+    return offset;
+  }
   // Make sure subMap isn't too big
   DCHECK_EQ(subMap >> kNumSubMapBits_, 0);
   // Make sure subMap bits of offset are clear
@@ -466,19 +468,17 @@ struct AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn,
     ahm_iterator : boost::iterator_facade<ahm_iterator<ContT, IterVal, SubIt>,
                                           IterVal,
                                           boost::forward_traversal_tag> {
-  explicit ahm_iterator() : ahm_(0) {}
+  explicit ahm_iterator() : ahm_(nullptr) {}
 
   // Conversion ctor for interoperability between const_iterator and
   // iterator.  The enable_if<> magic keeps us well-behaved for
   // is_convertible<> (v. the iterator_facade documentation).
   template <class OtherContT, class OtherVal, class OtherSubIt>
-  ahm_iterator(const ahm_iterator<OtherContT,OtherVal,OtherSubIt>& o,
-               typename std::enable_if<
-               std::is_convertible<OtherSubIt,SubIt>::value >::type* = 0)
-      : ahm_(o.ahm_)
-      , subMap_(o.subMap_)
-      , subIt_(o.subIt_)
-  {}
+  ahm_iterator(
+      const ahm_iterator<OtherContT, OtherVal, OtherSubIt>& o,
+      typename std::enable_if<
+          std::is_convertible<OtherSubIt, SubIt>::value>::type* = nullptr)
+      : ahm_(o.ahm_), subMap_(o.subMap_), subIt_(o.subIt_) {}
 
   /*
    * Returns the unique index that can be used for access directly

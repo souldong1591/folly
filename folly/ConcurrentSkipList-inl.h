@@ -138,7 +138,9 @@ class SkipListNode : private boost::noncopyable {
       height_(height), data_(std::forward<U>(data)) {
     spinLock_.init();
     setFlags(0);
-    if (isHead) setIsHeadNode();
+    if (isHead) {
+      setIsHeadNode();
+    }
     // need to explicitly init the dynamic atomic pointer array
     for (uint8_t i = 0; i < height_; ++i) {
       new (&skip_[i]) std::atomic<SkipListNode*>(nullptr);
@@ -253,7 +255,7 @@ class NodeRecycler<NodeType, NodeAlloc, typename std::enable_if<
   void add(NodeType* node) {
     std::lock_guard<MicroSpinLock> g(lock_);
     if (nodes_.get() == nullptr) {
-      nodes_.reset(new std::vector<NodeType*>(1, node));
+      nodes_ = std::make_unique<std::vector<NodeType*>>(1, node);
     } else {
       nodes_->push_back(node);
     }
@@ -335,4 +337,5 @@ class NodeRecycler<NodeType, NodeAlloc, typename std::enable_if<
   NodeAlloc alloc_;
 };
 
-}}  // namespaces
+} // namespace detail
+} // namespace folly

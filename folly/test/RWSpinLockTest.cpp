@@ -228,11 +228,13 @@ TEST(RWSpinLock, concurrent_holder_test) {
   sleep(5);
   stop.store(true, std::memory_order_release);
 
-  for (auto& t : threads) t.join();
+  for (auto& t : threads) {
+    t.join();
+  }
 
   LOG(INFO) << "reads: " << reads.load(std::memory_order_acquire)
     << "; writes: " << writes.load(std::memory_order_acquire)
     << "; upgrades: " << upgrades.load(std::memory_order_acquire);
 }
 
-}
+} // namespace

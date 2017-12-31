@@ -15,7 +15,7 @@
  */
 #include <folly/experimental/logging/LogMessage.h>
 
-#include <folly/ThreadId.h>
+#include <folly/system/ThreadId.h>
 
 using std::chrono::system_clock;
 
@@ -131,4 +131,4 @@ void LogMessage::sanitizeMessage() {
     }
   }
 }
-}
+} // namespace folly

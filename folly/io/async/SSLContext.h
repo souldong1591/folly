@@ -275,6 +275,7 @@ class SSLContext {
    * @param cert  A PEM formatted certificate
    */
   virtual void loadCertificateFromBufferPEM(folly::StringPiece cert);
+
   /**
    * Load private key.
    *
@@ -288,6 +289,41 @@ class SSLContext {
    * @param pkey  A PEM formatted key
    */
   virtual void loadPrivateKeyFromBufferPEM(folly::StringPiece pkey);
+
+  /**
+   * Load cert and key from PEM buffers. Guaranteed to throw if cert and
+   * private key mismatch so no need to call isCertKeyPairValid.
+   *
+   * @param cert A PEM formatted certificate
+   * @param pkey A PEM formatted key
+   */
+  virtual void loadCertKeyPairFromBufferPEM(
+      folly::StringPiece cert,
+      folly::StringPiece pkey);
+
+  /**
+   * Load cert and key from files. Guaranteed to throw if cert and key mismatch.
+   * Equivalent to calling loadCertificate() and loadPrivateKey().
+   *
+   * @param certPath   Path to the certificate file
+   * @param keyPath   Path to the private key file
+   * @param certFormat Certificate file format
+   * @param keyFormat Private key file format
+   */
+  virtual void loadCertKeyPairFromFiles(
+      const char* certPath,
+      const char* keyPath,
+      const char* certFormat = "PEM",
+      const char* keyFormat = "PEM");
+
+  /**
+   * Call after both cert and key are loaded to check if cert matches key.
+   * Must call if private key is loaded before loading the cert.
+   * No need to call if cert is loaded first before private key.
+   * @return true if matches, or false if mismatch.
+   */
+  virtual bool isCertKeyPairValid() const;
+
   /**
    * Load trusted certificates from specified file.
    *
@@ -461,29 +497,6 @@ class SSLContext {
   SSL_CTX *getSSLCtx() const {
     return ctx_;
   }
-
-  /**
-   * Set preferences for how to treat locks in OpenSSL.  This must be
-   * called before the instantiation of any SSLContext objects, otherwise
-   * the defaults will be used.
-   *
-   * OpenSSL has a lock for each module rather than for each object or
-   * data that needs locking.  Some locks protect only refcounts, and
-   * might be better as spinlocks rather than mutexes.  Other locks
-   * may be totally unnecessary if the objects being protected are not
-   * shared between threads in the application.
-   *
-   * By default, all locks are initialized as mutexes.  OpenSSL's lock usage
-   * may change from version to version and you should know what you are doing
-   * before disabling any locks entirely.
-   *
-   * Example: if you don't share SSL sessions between threads in your
-   * application, you may be able to do this
-   *
-   * setSSLLockTypes({{CRYPTO_LOCK_SSL_SESSION, SSLContext::LOCK_NONE}})
-   */
-  FOLLY_DEPRECATED("Use folly::ssl::setLockTypes")
-  static void setSSLLockTypes(std::map<int, ssl::LockType> lockTypes);
 
   /**
    * Examine OpenSSL's error stack, and return a string description of the

@@ -19,7 +19,6 @@
 
 #pragma once
 
-#include <folly/FBString.h>
 #include <folly/Portability.h>
 #include <folly/hash/SpookyHashV2.h>
 #include <folly/portability/BitsFunctexcept.h>
@@ -30,6 +29,7 @@
 #include <glog/logging.h>
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <climits>
 #include <cstddef>
 #include <cstring>
@@ -37,17 +37,6 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
-
-// libc++ doesn't provide this header, nor does msvc
-#ifdef FOLLY_HAVE_BITS_CXXCONFIG_H
-// This file appears in two locations: inside fbcode and in the
-// libstdc++ source code (when embedding fbstring as std::string).
-// To aid in this schizophrenic use, two macros are defined in
-// c++config.h:
-//   _LIBSTDCXX_FBSTRING - Set inside libstdc++.  This is useful to
-//      gate use inside fbcode v. libstdc++
-#include <bits/c++config.h>
-#endif
 
 #include <folly/CpuId.h>
 #include <folly/Likely.h>
@@ -60,6 +49,15 @@ FOLLY_PUSH_WARNING
 FOLLY_GCC_DISABLE_WARNING("-Wshadow")
 
 namespace folly {
+
+/**
+ * Ubiquitous helper template for knowing what's a string.
+ */
+template <class T>
+struct IsSomeString : std::false_type {};
+
+template <>
+struct IsSomeString<std::string> : std::true_type {};
 
 template <class Iter>
 class Range;
@@ -251,30 +249,58 @@ class Range : private boost::totally_ordered<Range<Iter>> {
   Range(const Range& other, size_type first, size_type length = npos)
       : Range(other.subpiece(first, length)) {}
 
-  template <class T = Iter, typename detail::IsCharPointer<T>::const_type = 0>
-  /* implicit */ Range(const fbstring& str)
-      : b_(str.data()), e_(b_ + str.size()) {}
+  template <
+      class Container,
+      class = typename std::enable_if<
+          std::is_same<Iter, typename Container::const_pointer>::value>::type,
+      class = decltype(
+          Iter(std::declval<Container const&>().data()),
+          Iter(
+              std::declval<Container const&>().data() +
+              std::declval<Container const&>().size()))>
+  /* implicit */ constexpr Range(Container const& container)
+      : b_(container.data()), e_(b_ + container.size()) {}
 
-  template <class T = Iter, typename detail::IsCharPointer<T>::const_type = 0>
-  Range(const fbstring& str, fbstring::size_type startFrom) {
-    if (UNLIKELY(startFrom > str.size())) {
+  template <
+      class Container,
+      class = typename std::enable_if<
+          std::is_same<Iter, typename Container::const_pointer>::value>::type,
+      class = decltype(
+          Iter(std::declval<Container const&>().data()),
+          Iter(
+              std::declval<Container const&>().data() +
+              std::declval<Container const&>().size()))>
+  Range(Container const& container, typename Container::size_type startFrom) {
+    auto const cdata = container.data();
+    auto const csize = container.size();
+    if (UNLIKELY(startFrom > csize)) {
       std::__throw_out_of_range("index out of range");
     }
-    b_ = str.data() + startFrom;
-    e_ = str.data() + str.size();
+    b_ = cdata + startFrom;
+    e_ = cdata + csize;
   }
 
-  template <class T = Iter, typename detail::IsCharPointer<T>::const_type = 0>
+  template <
+      class Container,
+      class = typename std::enable_if<
+          std::is_same<Iter, typename Container::const_pointer>::value>::type,
+      class = decltype(
+          Iter(std::declval<Container const&>().data()),
+          Iter(
+              std::declval<Container const&>().data() +
+              std::declval<Container const&>().size()))>
   Range(
-      const fbstring& str,
-      fbstring::size_type startFrom,
-      fbstring::size_type size) {
-    if (UNLIKELY(startFrom > str.size())) {
+      Container const& container,
+      typename Container::size_type startFrom,
+      typename Container::size_type size) {
+    auto const cdata = container.data();
+    auto const csize = container.size();
+    if (UNLIKELY(startFrom > csize)) {
       std::__throw_out_of_range("index out of range");
     }
-    b_ = str.data() + startFrom;
-    if (str.size() - startFrom < size) {
-      e_ = str.data() + str.size();
+    b_ = cdata + startFrom;
+    if (csize - startFrom < size) {
+      e_ = cdata + csize;
     } else {
       e_ = b_ + size;
     }
@@ -448,19 +474,18 @@ class Range : private boost::totally_ordered<Range<Iter>> {
     assert(b_ < e_);
     return detail::value_before(e_);
   }
+
+  template <typename Tgt>
+  auto to() const
+      -> decltype(Tgt(std::declval<Iter const&>(), std::declval<size_type>())) {
+    return Tgt(b_, size());
+  }
   // Works only for Range<const char*> and Range<char*>
   std::string str() const {
-    return std::string(b_, size());
+    return to<std::string>();
   }
   std::string toString() const {
-    return str();
-  }
-  // Works only for Range<const char*> and Range<char*>
-  fbstring fbstr() const {
-    return fbstring(b_, size());
-  }
-  fbstring toFbstring() const {
-    return fbstr();
+    return to<std::string>();
   }
 
   const_range_type castToConst() const {
@@ -987,22 +1012,43 @@ constexpr Range<Iter> range(Iter first, Iter last) {
  * Creates a range to reference the contents of a contiguous-storage container.
  */
 // Use pointers for types with '.data()' member
-template <
-    class Collection,
-    class T = typename std::remove_pointer<
-        decltype(std::declval<Collection>().data())>::type>
-constexpr Range<T*> range(Collection&& v) {
-  return Range<T*>(v.data(), v.data() + v.size());
+template <class Collection>
+constexpr auto range(Collection& v) -> Range<decltype(v.data())> {
+  return Range<decltype(v.data())>(v.data(), v.data() + v.size());
+}
+template <class Collection>
+constexpr auto range(Collection const& v) -> Range<decltype(v.data())> {
+  return Range<decltype(v.data())>(v.data(), v.data() + v.size());
+}
+template <class Collection>
+constexpr auto crange(Collection const& v) -> Range<decltype(v.data())> {
+  return Range<decltype(v.data())>(v.data(), v.data() + v.size());
 }
 
 template <class T, size_t n>
 constexpr Range<T*> range(T (&array)[n]) {
   return Range<T*>(array, array + n);
 }
+template <class T, size_t n>
+constexpr Range<T const*> range(T const (&array)[n]) {
+  return Range<T const*>(array, array + n);
+}
+template <class T, size_t n>
+constexpr Range<T const*> crange(T const (&array)[n]) {
+  return Range<T const*>(array, array + n);
+}
 
 template <class T, size_t n>
-constexpr Range<const T*> range(const std::array<T, n>& array) {
-  return Range<const T*>{array};
+constexpr Range<T*> range(std::array<T, n>& array) {
+  return Range<T*>{array};
+}
+template <class T, size_t n>
+constexpr Range<T const*> range(std::array<T, n> const& array) {
+  return Range<T const*>{array};
+}
+template <class T, size_t n>
+constexpr Range<T const*> crange(std::array<T, n> const& array) {
+  return Range<T const*>{array};
 }
 
 typedef Range<const char*> StringPiece;
@@ -1315,17 +1361,6 @@ struct hasher<
 };
 
 /**
- * Ubiquitous helper template for knowing what's a string
- */
-template <class T>
-struct IsSomeString {
-  enum {
-    value =
-        std::is_same<T, std::string>::value || std::is_same<T, fbstring>::value
-  };
-};
-
-/**
  * _sp is a user-defined literal suffix to make an appropriate Range
  * specialization from a literal string.
  *
@@ -1356,8 +1391,8 @@ constexpr Range<wchar_t const*> operator"" _sp(
     size_t len) noexcept {
   return Range<wchar_t const*>(str, len);
 }
-} // inline namespace string_piece_literals
-} // inline namespace literals
+} // namespace string_piece_literals
+} // namespace literals
 
 } // namespace folly
 

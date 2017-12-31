@@ -15,8 +15,8 @@
  */
 
 #include <folly/Benchmark.h>
-#include <folly/Foreach.h>
 #include <folly/String.h>
+#include <folly/container/Foreach.h>
 #include <algorithm>
 #include <iostream>
 #include <numeric>
@@ -155,7 +155,7 @@ class NonTrivialLong {
   long value_;
   long otherStuff_[3];
 };
-}
+} // namespace
 
 BENCHMARK(optimizerCanDiscardNonTrivial, n) {
   NonTrivialLong x(0);

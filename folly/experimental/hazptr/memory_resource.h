@@ -23,8 +23,10 @@
 /// hazptr prototype.
 ////////////////////////////////////////////////////////////////////////////////
 
-#include <folly/Portability.h>
 #include <memory>
+
+#include <folly/Portability.h>
+#include <folly/lang/Align.h>
 
 namespace folly {
 namespace hazptr {
@@ -34,16 +36,16 @@ class memory_resource {
   virtual ~memory_resource() = default;
   virtual void* allocate(
       const size_t bytes,
-      const size_t alignment = folly::max_align_v) = 0;
+      const size_t alignment = max_align_v) = 0;
   virtual void deallocate(
       void* p,
       const size_t bytes,
-      const size_t alignment = folly::max_align_v) = 0;
+      const size_t alignment = max_align_v) = 0;
 };
 
 memory_resource* get_default_resource();
 void set_default_resource(memory_resource*);
 memory_resource* new_delete_resource();
 
-} // namespace folly
 } // namespace hazptr
+} // namespace folly

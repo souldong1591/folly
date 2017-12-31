@@ -227,7 +227,7 @@ class AsyncServerSocket : public DelayedDestruction
                                                  Destructor());
   }
 
-  void setShutdownSocketSet(ShutdownSocketSet* newSS);
+  void setShutdownSocketSet(const std::weak_ptr<ShutdownSocketSet>& wNewSS);
 
   /**
    * Destroy the socket.
@@ -318,6 +318,11 @@ class AsyncServerSocket : public DelayedDestruction
       return sockets_[0].socket_;
     }
   }
+
+  /* enable zerocopy support for the server sockets - the s = accept sockets
+   * inherit it
+   */
+  bool setZeroCopy(bool enable);
 
   /**
    * Bind to the specified address.
@@ -872,7 +877,7 @@ class AsyncServerSocket : public DelayedDestruction
   bool tfo_{false};
   bool noTransparentTls_{false};
   uint32_t tfoMaxQueueSize_{0};
-  ShutdownSocketSet* shutdownSocketSet_;
+  std::weak_ptr<ShutdownSocketSet> wShutdownSocketSet_;
   ConnectionEventCallback* connectionEventCallback_{nullptr};
 };
 

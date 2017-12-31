@@ -17,14 +17,15 @@
 // @author: Xin Liu <xliux@fb.com>
 
 #include <map>
+#include <memory>
 #include <random>
 #include <set>
 #include <thread>
 
 #include <folly/Benchmark.h>
 #include <folly/ConcurrentSkipList.h>
-#include <folly/Hash.h>
 #include <folly/RWSpinLock.h>
+#include <folly/hash/Hash.h>
 #include <folly/portability/GFlags.h>
 #include <glog/logging.h>
 
@@ -72,7 +73,9 @@ void BM_IterateOverSet(int iters, int size) {
   auto iter = a_set.begin();
   for (int i = 0; i < iters; ++i) {
     sum += *iter++;
-    if (iter == a_set.end()) iter = a_set.begin();
+    if (iter == a_set.end()) {
+      iter = a_set.begin();
+    }
   }
   BENCHMARK_SUSPEND {
     // VLOG(20) << "sum = " << sum;
@@ -92,7 +95,9 @@ void BM_IterateSkipList(int iters, int size) {
   auto iter = skipList.begin();
   for (int i = 0; i < iters; ++i) {
     sum += *iter++;
-    if (iter == skipList.end()) iter = skipList.begin();
+    if (iter == skipList.end()) {
+      iter = skipList.begin();
+    }
   }
 
   BENCHMARK_SUSPEND {
@@ -114,7 +119,9 @@ void BM_SetMerge(int iters, int size) {
 
   int64_t mergedSum = 0;
   FOR_EACH(it, a_set) {
-    if (b_set.find(*it) != b_set.end()) mergedSum += *it;
+    if (b_set.find(*it) != b_set.end()) {
+      mergedSum += *it;
+    }
   }
   BENCHMARK_SUSPEND {
     // VLOG(20) << mergedSum;
@@ -137,7 +144,9 @@ void BM_CSLMergeLookup(int iters, int size) {
 
   SkipListType::Skipper skipper(skipList2);
   FOR_EACH(it, skipList) {
-    if (skipper.to(*it)) mergedSum += *it;
+    if (skipper.to(*it)) {
+      mergedSum += *it;
+    }
   }
 
   BENCHMARK_SUSPEND {
@@ -347,7 +356,9 @@ class ConcurrentAccessData {
 
     for (int i = 0; i < FLAGS_num_sets; ++i) {
       locks_[i] = new RWSpinLock();
-      if (i > 0) sets_[i] = sets_[0];
+      if (i > 0) {
+        sets_[i] = sets_[0];
+      }
     }
 
 // This requires knowledge of the C++ library internals. Only use it if we're
@@ -435,7 +446,7 @@ class ConcurrentAccessData {
         } else {
           skipListInsert(0, writeValues_[t]);
         }
-        return 0;
+        return false;
       default:
         return skipListFind(0, readValues_[t]);
     }
@@ -454,7 +465,7 @@ class ConcurrentAccessData {
         } else {
           setInsert(idx, writeValues_[t]);
         }
-        return 0;
+        return false;
       default:
         return setFind(idx, readValues_[t]);
     }
@@ -475,8 +486,7 @@ static std::map<int, std::shared_ptr<ConcurrentAccessData> > g_data;
 static ConcurrentAccessData *mayInitTestData(int size) {
   auto it = g_data.find(size);
   if (it == g_data.end()) {
-    auto ptr = std::shared_ptr<ConcurrentAccessData>(
-        new ConcurrentAccessData(size));
+    auto ptr = std::make_shared<ConcurrentAccessData>(size);
     g_data[size] = ptr;
     return ptr.get();
   }
@@ -595,7 +605,7 @@ BENCHMARK_PARAM(BM_ContentionStdSet, 1048576);
 BENCHMARK_PARAM(BM_ContentionCSL,    1048576);
 BENCHMARK_DRAW_LINE();
 
-}
+} // namespace
 
 int main(int argc, char** argv) {
   google::InitGoogleLogging(argv[0]);
